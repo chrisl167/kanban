@@ -6,7 +6,75 @@
     <title>服药与工作看板</title>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <header class="container header">
+        <div>
+          <h1>服药与工作看板</h1>
+          <p class="subtitle">待办、进行中、已完成；可保留服药任务，也可新增工作事项。</p>
+        </div>
+        <div class="header-actions">
+          <button class="secondary" id="authButton">登录</button>
+          <button class="primary" id="addTask">新增事项</button>
+        </div>
+      </header>
+
+      <main class="container">
+        <section class="summary">
+          <div class="panel">
+            <h3>今日待处理</h3>
+            <ul id="todayList"></ul>
+          </div>
+          <div class="panel">
+            <h3>进度统计</h3>
+            <div class="stats" id="stats"></div>
+            <p class="cloud-status" id="cloudStatus">本地模式：记录保存在当前浏览器。</p>
+          </div>
+        </section>
+
+        <section class="board" id="board"></section>
+      </main>
+    </div>
+
+    <dialog id="taskDialog">
+      <form id="taskForm" method="dialog">
+        <h3 id="dialogTitle">新增事项</h3>
+        <label>事项名称<input name="title" required maxlength="80" /></label>
+        <label>备注说明<textarea name="description" maxlength="300"></textarea></label>
+        <div class="form-grid">
+          <label>状态
+            <select name="status">
+              <option value="todo">待办</option>
+              <option value="doing">进行中</option>
+              <option value="done">已完成</option>
+            </select>
+          </label>
+          <label>优先级
+            <select name="priority">
+              <option value="low">低</option>
+              <option value="normal" selected>普通</option>
+              <option value="high">高</option>
+              <option value="urgent">紧急</option>
+            </select>
+          </label>
+          <label>分类
+            <select name="category">
+              <option value="work">工作</option>
+              <option value="medication">服药</option>
+              <option value="personal">个人</option>
+              <option value="other">其他</option>
+            </select>
+          </label>
+          <label>截止日期<input type="date" name="due_date" /></label>
+          <label>时间<input type="time" name="due_time" /></label>
+          <label>标签（逗号分隔）<input name="tags" maxlength="120" /></label>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="secondary" id="cancelDialog">取消</button>
+          <button type="submit" class="primary">保存</button>
+        </div>
+      </form>
+    </dialog>
+
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

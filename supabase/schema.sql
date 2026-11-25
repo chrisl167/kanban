@@ -1,6 +1,7 @@
 -- 看板任务表：同时承载服药任务和通用工作事项
 create table if not exists public.kanban_tasks (
   id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) not null default auth.uid(),
   title text not null,
   description text,
   status text not null default 'todo' check (status in ('todo', 'doing', 'done')),
@@ -15,30 +16,29 @@ create table if not exists public.kanban_tasks (
   updated_at timestamptz not null default now()
 );
 
--- 可选：如果接入 Supabase Auth，可加 owner_id uuid references auth.users(id)，并在策略中按 auth.uid() 过滤
 alter table public.kanban_tasks enable row level security;
 
--- 示例策略：个人自用演示允许匿名读写。正式公开项目请改为登录后仅访问本人数据。
-create policy "anon can read tasks"
+-- 登录用户只能读写自己的任务
+create policy "Users can read own tasks"
   on public.kanban_tasks for select
-  to anon
-  using (true);
+  to authenticated
+  using (auth.uid() = user_id);
 
-create policy "anon can insert tasks"
+create policy "Users can insert own tasks"
   on public.kanban_tasks for insert
-  to anon
-  with check (true);
+  to authenticated
+  with check (auth.uid() = user_id);
 
-create policy "anon can update tasks"
+create policy "Users can update own tasks"
   on public.kanban_tasks for update
-  to anon
-  using (true)
-  with check (true);
+  to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
 
-create policy "anon can delete tasks"
+create policy "Users can delete own tasks"
   on public.kanban_tasks for delete
-  to anon
-  using (true);
+  to authenticated
+  using (auth.uid() = user_id);
 
-create index if not exists idx_kanban_tasks_status on public.kanban_tasks(status);
+create index if not exists idx_kanban_tasks_user_status on public.kanban_tasks(user_id, status);
 create index if not exists idx_kanban_tasks_due_date on public.kanban_tasks(due_date);

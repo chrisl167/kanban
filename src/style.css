@@ -19,10 +19,13 @@ body {
 }
 .container { max-width: 1180px; margin: 0 auto; padding: 24px 18px; }
 header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
+.header-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 h1 { margin: 0 0 6px; font-size: 28px; }
 .subtitle { color: var(--muted); margin: 0; }
 button { border: 0; border-radius: 12px; padding: 10px 14px; cursor: pointer; font: inherit; }
 button.primary { background: var(--primary); color: #fff; }
+button.secondary { background: #eef2f7; color: var(--text); }
+.cloud-status { color: var(--muted); font-size: 13px; margin-bottom: 0; }
 .stats { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 12px; margin: 18px 0; }
 .stat-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
 .stat-card b { display: block; font-size: 24px; color: var(--primary); }
@@ -50,7 +53,16 @@ button.primary { background: var(--primary); color: #fff; }
 .card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .card-actions button { background: #eef2f7; padding: 6px 8px; font-size: 12px; }
 .card-actions .danger { color: var(--danger); background: #fff1f2; }
+dialog { border: 0; border-radius: 20px; padding: 22px; width: min(560px, calc(100vw - 32px)); background: var(--card); box-shadow: 0 24px 60px rgba(20,40,80,.22); }
+dialog::backdrop { background: rgba(15,23,42,.38); }
+dialog h3 { margin: 0 0 16px; }
+dialog label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0; }
+dialog input, dialog select, dialog textarea { width: 100%; margin-top: 5px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font: inherit; background: #fff; }
+dialog textarea { min-height: 72px; resize: vertical; }
+.form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 14px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 @media (max-width: 900px) {
   .board, .summary, .stats { grid-template-columns: 1fr; }
   header { flex-direction: column; align-items: flex-start; }
+  .form-grid { grid-template-columns: 1fr; }
 }

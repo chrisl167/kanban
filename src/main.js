@@ -10,6 +10,8 @@ const columns = [
 ]
 
 let tasks = loadLocalTasks()
+let currentUser = null
+let editingId = null
 
 function loadLocalTasks() {
   try {
@@ -25,33 +27,46 @@ function persistLocal() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks))
 }
 
-async function syncTasks() {
-  if (!supabaseEnabled || !supabase) return
-  const { data, error } = await supabase.from('kanban_tasks').select('*').order('sort_order', { ascending: true })
-  if (error) {
-    console.warn('Supabase 读取失败，继续使用本地数据', error.message)
-    return
-  }
-  if (data && data.length) {
-    tasks = data.map(row => ({
-      id: row.id,
-      title: row.title,
-      description: row.description || '',
-      status: row.status,
-      priority: row.priority,
-      category: row.category,
-      due_date: row.due_date,
-      due_time: row.due_time,
-      tags: row.tags || [],
-      sort_order: row.sort_order
-    }))
-    persistLocal()
-    render()
+function normalizeTask(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description || '',
+    status: row.status,
+    priority: row.priority,
+    category: row.category,
+    due_date: row.due_date || '',
+    due_time: row.due_time || '',
+    tags: row.tags || [],
+    sort_order: row.sort_order || 0,
+    completed_at: row.completed_at || null
   }
 }
 
-async function upsertTask(task) {
-  if (!supabaseEnabled || !supabase) return
+async function syncTasks() {
+  if (!supabaseEnabled || !supabase || !currentUser) {
+    render()
+    return
+  }
+  const { data, error } = await supabase
+    .from('kanban_tasks')
+    .select('*')
+    .order('sort_order', { ascending: true })
+
+  if (error) {
+    console.warn('Supabase 读取失败，继续使用本地数据', error.message)
+    document.getElementById('cloudStatus').textContent = '云端读取失败，当前使用本地缓存。'
+    render()
+    return
+  }
+
+  tasks = data && data.length ? data.map(normalizeTask) : structuredClone(defaultTasks)
+  persistLocal()
+  render()
+}
+
+async function saveTaskToCloud(task) {
+  if (!supabaseEnabled || !supabase || !currentUser) return
   const payload = {
     title: task.title,
     description: task.description,
@@ -61,13 +76,24 @@ async function upsertTask(task) {
     due_date: task.due_date || null,
     due_time: task.due_time || null,
     tags: task.tags,
-    sort_order: task.sort_order || 0
+    sort_order: task.sort_order || 0,
+    completed_at: task.status === 'done' ? new Date().toISOString() : null
   }
-  if (task.id && task.id.startsWith('remote-')) {
-    await supabase.from('kanban_tasks').update(payload).eq('id', task.id)
+
+  if (task.id && !task.id.startsWith('local-')) {
+    const { error } = await supabase.from('kanban_tasks').update(payload).eq('id', task.id)
+    if (error) console.warn('更新云端任务失败', error.message)
   } else {
-    const { data } = await supabase.from('kanban_tasks').insert(payload).select('id').single()
-    if (data) task.id = data.id
+    const { data, error } = await supabase.from('kanban_tasks').insert(payload).select('id').single()
+    if (!error && data) task.id = data.id
+  }
+}
+
+async function deleteTaskFromCloud(task) {
+  if (!supabaseEnabled || !supabase || !currentUser) return
+  if (task.id && !task.id.startsWith('local-')) {
+    const { error } = await supabase.from('kanban_tasks').delete().eq('id', task.id)
+    if (error) console.warn('删除云端任务失败', error.message)
   }
 }
 
@@ -90,8 +116,19 @@ function renderStats() {
 
   document.getElementById('todayList').innerHTML = todayTasks
     .filter(t => t.status !== 'done')
-    .map(t => `<li>${t.due_time ? `<span class="time">${t.due_time}</span>` : ''} ${t.title}</li>`)
+    .map(t => `<li>${t.due_time ? `<span class="time">${t.due_time}</span>` : ''} ${escapeHtml(t.title)}</li>`)
     .join('') || '<li>今天没有待处理事项</li>'
+
+  const status = document.getElementById('cloudStatus')
+  if (!supabaseEnabled) status.textContent = '本地模式：未配置 Supabase，记录保存在当前浏览器。'
+  else if (!currentUser) status.textContent = '未登录：当前使用本地缓存；登录后可云端同步。'
+  else status.textContent = `云端已连接：当前账号 ${currentUser.email || currentUser.id}`
+}
+
+function escapeHtml(text) {
+  return String(text || '').replace(/[&<>'"]/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+  }[ch]))
 }
 
 function taskCard(task) {
@@ -103,10 +140,11 @@ function taskCard(task) {
         <span class="badge ${task.category}">${categoryMap[task.category]}</span>
         <span class="priority ${task.priority}">${priorityMap[task.priority]}</span>
       </div>
-      <h4>${task.title}</h4>
-      <p>${task.description || ''}</p>
-      <div class="tags">${task.tags.map(tag => `<span>#${tag}</span>`).join('')}</div>
+      <h4>${escapeHtml(task.title)}</h4>
+      <p>${escapeHtml(task.description)}</p>
+      <div class="tags">${task.tags.map(tag => `<span>#${escapeHtml(tag)}</span>`).join('')}</div>
       <div class="card-actions">
+        <button data-action="edit">编辑</button>
         <button data-action="move" data-status="todo">待办</button>
         <button data-action="move" data-status="doing">进行中</button>
         <button data-action="move" data-status="done">完成</button>
@@ -134,15 +172,25 @@ function renderBoard() {
       const task = tasks.find(t => t.id === card.dataset.id)
       task.status = btn.dataset.status
       persistLocal()
-      upsertTask(task)
+      saveTaskToCloud(task)
       render()
     })
   })
 
-  board.querySelectorAll('[data-action="delete"]').forEach(btn => {
+  board.querySelectorAll('[data-action="edit"]').forEach(btn => {
     btn.addEventListener('click', () => {
       const card = btn.closest('.card')
       const task = tasks.find(t => t.id === card.dataset.id)
+      openTaskDialog(task)
+    })
+  })
+
+  board.querySelectorAll('[data-action="delete"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const card = btn.closest('.card')
+      const task = tasks.find(t => t.id === card.dataset.id)
+      if (!confirm(`确定删除“${task.title}”吗？`)) return
+      await deleteTaskFromCloud(task)
       tasks = tasks.filter(t => t.id !== task.id)
       persistLocal()
       render()
@@ -168,10 +216,78 @@ function bindDragDrop() {
       if (!task) return
       task.status = status
       persistLocal()
-      upsertTask(task)
+      saveTaskToCloud(task)
       render()
     })
   })
+}
+
+function openTaskDialog(task = null) {
+  editingId = task?.id || null
+  const form = document.getElementById('taskForm')
+  document.getElementById('dialogTitle').textContent = task ? '编辑事项' : '新增事项'
+  form.title.value = task?.title || ''
+  form.description.value = task?.description || ''
+  form.status.value = task?.status || 'todo'
+  form.priority.value = task?.priority || 'normal'
+  form.category.value = task?.category || 'work'
+  form.due_date.value = task?.due_date || ''
+  form.due_time.value = task?.due_time || ''
+  form.tags.value = task?.tags?.join(', ') || ''
+  document.getElementById('taskDialog').showModal()
+}
+
+function handleFormSubmit(event) {
+  event.preventDefault()
+  const form = event.target
+  const tags = form.tags.value.split(',').map(tag => tag.trim()).filter(Boolean)
+  const payload = {
+    title: form.title.value.trim(),
+    description: form.description.value.trim(),
+    status: form.status.value,
+    priority: form.priority.value,
+    category: form.category.value,
+    due_date: form.due_date.value,
+    due_time: form.due_time.value,
+    tags,
+    sort_order: tasks.length
+  }
+
+  let task = tasks.find(t => t.id === editingId)
+  if (task) {
+    Object.assign(task, payload)
+  } else {
+    task = { id: `local-${Date.now()}`, ...payload }
+    tasks.unshift(task)
+  }
+
+  persistLocal()
+  saveTaskToCloud(task)
+  document.getElementById('taskDialog').close()
+  render()
+}
+
+async function handleAuth() {
+  if (!supabaseEnabled || !supabase) {
+    alert('未配置 Supabase 环境变量，当前只能使用本地模式。')
+    return
+  }
+  if (currentUser) {
+    await supabase.auth.signOut()
+    currentUser = null
+    tasks = structuredClone(defaultTasks)
+    persistLocal()
+    render()
+    return
+  }
+  const email = prompt('请输入登录邮箱')
+  if (!email) return
+  const { error } = await supabase.auth.signInWithOtp({ email })
+  if (error) {
+    alert(`登录失败：${error.message}`)
+    return
+  }
+  alert('登录邮件已发送，请查收邮箱中的链接完成登录，然后刷新页面。')
 }
 
 function render() {
@@ -179,26 +295,26 @@ function render() {
   renderBoard()
 }
 
-document.getElementById('addTask').addEventListener('click', () => {
-  const title = prompt('事项名称')
-  if (!title) return
-  const task = {
-    id: `local-${Date.now()}`,
-    title,
-    description: '',
-    status: 'todo',
-    priority: 'normal',
-    category: 'work',
-    due_date: '',
-    due_time: '',
-    tags: ['新增'],
-    sort_order: tasks.length
-  }
-  tasks.unshift(task)
-  persistLocal()
-  upsertTask(task)
-  render()
-})
+document.getElementById('addTask').addEventListener('click', () => openTaskDialog())
+document.getElementById('cancelDialog').addEventListener('click', () => document.getElementById('taskDialog').close())
+document.getElementById('taskForm').addEventListener('submit', handleFormSubmit)
+document.getElementById('authButton').addEventListener('click', handleAuth)
 
-render()
-syncTasks()
+async function initAuth() {
+  if (!supabaseEnabled || !supabase) {
+    render()
+    return
+  }
+  const { data } = await supabase.auth.getSession()
+  currentUser = data.session?.user || null
+  document.getElementById('authButton').textContent = currentUser ? '退出登录' : '登录'
+  await syncTasks()
+
+  supabase.auth.onAuthStateChange((_event, session) => {
+    currentUser = session?.user || null
+    document.getElementById('authButton').textContent = currentUser ? '退出登录' : '登录'
+    syncTasks()
+  })
+}
+
+initAuth()

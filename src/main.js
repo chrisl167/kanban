@@ -3,6 +3,7 @@ import { supabase, supabaseEnabled } from './supabase.js'
 import { defaultTasks } from './defaultTasks.js'
 
 const STORAGE_KEY = 'kanban-med-board-v1'
+const BASE_URL = import.meta.env.BASE_URL || '/'
 const columns = [
   { key: 'todo', label: '待办' },
   { key: 'doing', label: '进行中' },
@@ -12,6 +13,58 @@ const columns = [
 let tasks = loadLocalTasks()
 let currentUser = null
 let editingId = null
+
+function normalizePath(pathname) {
+  let path = pathname || '/'
+  if (BASE_URL !== '/' && path.startsWith(BASE_URL)) {
+    path = path.slice(BASE_URL.length)
+  }
+  return `/${path.replace(/^\/+/, '')}`
+}
+
+async function handleAuthCallback() {
+  if (!supabaseEnabled || !supabase) return false
+
+  const path = normalizePath(window.location.pathname)
+  if (path !== '/auth/callback') return false
+
+  const params = new URLSearchParams(window.location.search)
+  const hashParams = new URLSearchParams(window.location.hash.slice(1))
+  const code = params.get('code') || hashParams.get('code')
+  const tokenHash = params.get('token_hash') || hashParams.get('token_hash')
+  const type = params.get('type') || hashParams.get('type') || 'email'
+
+  const statusEl = document.getElementById('cloudStatus')
+  const showStatus = (text) => {
+    if (statusEl) statusEl.textContent = text
+  }
+
+  try {
+    if (code) {
+      const { error } = await supabase.auth.exchangeCodeForSession(code)
+      if (error) throw error
+    } else if (tokenHash) {
+      const email = params.get('email') || hashParams.get('email')
+      const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type, email })
+      if (error) throw error
+    } else {
+      showStatus('登录回调缺少 code 或 token_hash，请重新发送登录邮件。')
+      return true
+    }
+
+    const { data } = await supabase.auth.getSession()
+    currentUser = data.session?.user || null
+    const home = `${BASE_URL}`
+    window.history.replaceState({}, '', home)
+    showStatus(currentUser ? `云端已连接：当前账号 ${currentUser.email || currentUser.id}` : '登录完成。')
+    render()
+    return true
+  } catch (error) {
+    showStatus(`登录回调失败：${error.message}`)
+    console.warn('Supabase 登录回调失败', error.message)
+    return true
+  }
+}
 
 function loadLocalTasks() {
   try {
@@ -282,7 +335,11 @@ async function handleAuth() {
   }
   const email = prompt('请输入登录邮箱')
   if (!email) return
-  const { error } = await supabase.auth.signInWithOtp({ email })
+  const callbackUrl = new URL(`${BASE_URL}auth/callback`, window.location.origin).toString()
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: callbackUrl }
+  })
   if (error) {
     alert(`登录失败：${error.message}`)
     return
@@ -301,6 +358,8 @@ document.getElementById('taskForm').addEventListener('submit', handleFormSubmit)
 document.getElementById('authButton').addEventListener('click', handleAuth)
 
 async function initAuth() {
+  if (await handleAuthCallback()) return
+
   if (!supabaseEnabled || !supabase) {
     render()
     return

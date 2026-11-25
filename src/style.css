@@ -61,6 +61,10 @@ dialog input, dialog select, dialog textarea { width: 100%; margin-top: 5px; bor
 dialog textarea { min-height: 72px; resize: vertical; }
 .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 14px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.auth-hint { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+.auth-message { min-height: 20px; color: var(--muted); font-size: 13px; margin: 10px 0 0; }
+.auth-message.error { color: var(--danger); }
+.otp-field input { letter-spacing: 0.35em; font-size: 18px; }
 @media (max-width: 900px) {
   .board, .summary, .stats { grid-template-columns: 1fr; }
   header { flex-direction: column; align-items: flex-start; }

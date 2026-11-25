@@ -13,6 +13,7 @@ const columns = [
 let tasks = loadLocalTasks()
 let currentUser = null
 let editingId = null
+let pendingEmail = ''
 
 function normalizePath(pathname) {
   let path = pathname || '/'
@@ -320,6 +321,82 @@ function handleFormSubmit(event) {
   render()
 }
 
+function setAuthMessage(text, isError = false) {
+  const el = document.getElementById('authMessage')
+  if (!el) return
+  el.textContent = text || ''
+  el.classList.toggle('error', Boolean(isError))
+}
+
+function openAuthDialog() {
+  const form = document.getElementById('authForm')
+  form.email.value = pendingEmail || ''
+  form.otp.value = ''
+  setAuthMessage('输入邮箱后点击“发送验证码”，再填写邮件中的 6 位数字。')
+  document.getElementById('authDialog').showModal()
+}
+
+function closeAuthDialog() {
+  document.getElementById('authDialog').close()
+  setAuthMessage('')
+}
+
+async function sendOtp() {
+  const form = document.getElementById('authForm')
+  const email = form.email.value.trim().toLowerCase()
+  if (!email) {
+    setAuthMessage('请先输入登录邮箱。', true)
+    return
+  }
+
+  pendingEmail = email
+  setAuthMessage('正在发送验证码……')
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: { shouldCreateUser: true }
+  })
+
+  if (error) {
+    setAuthMessage(`验证码发送失败：${error.message}`, true)
+    return
+  }
+
+  setAuthMessage(`验证码已发送到 ${email}，请查看邮件并填写 6 位数字。`)
+}
+
+async function verifyOtp(event) {
+  event.preventDefault()
+  const form = document.getElementById('authForm')
+  const email = form.email.value.trim().toLowerCase()
+  const otp = form.otp.value.trim()
+
+  if (!email) {
+    setAuthMessage('请先输入登录邮箱。', true)
+    return
+  }
+  if (!/^[0-9]{6}$/.test(otp)) {
+    setAuthMessage('请输入邮件中的 6 位数字验证码。', true)
+    return
+  }
+
+  pendingEmail = email
+  setAuthMessage('正在验证验证码……')
+  const { data, error } = await supabase.auth.verifyOtp({
+    email,
+    token: otp,
+    type: 'email'
+  })
+
+  if (error) {
+    setAuthMessage(`验证码错误或已过期：${error.message}`, true)
+    return
+  }
+
+  currentUser = data.session?.user || null
+  closeAuthDialog()
+  render()
+}
+
 async function handleAuth() {
   if (!supabaseEnabled || !supabase) {
     alert('未配置 Supabase 环境变量，当前只能使用本地模式。')
@@ -328,23 +405,13 @@ async function handleAuth() {
   if (currentUser) {
     await supabase.auth.signOut()
     currentUser = null
+    pendingEmail = ''
     tasks = structuredClone(defaultTasks)
     persistLocal()
     render()
     return
   }
-  const email = prompt('请输入登录邮箱')
-  if (!email) return
-  const callbackUrl = new URL(`${BASE_URL}auth/callback`, window.location.origin).toString()
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: { emailRedirectTo: callbackUrl }
-  })
-  if (error) {
-    alert(`登录失败：${error.message}`)
-    return
-  }
-  alert('登录邮件已发送，请查收邮箱中的链接完成登录，然后刷新页面。')
+  openAuthDialog()
 }
 
 function render() {
@@ -356,6 +423,9 @@ document.getElementById('addTask').addEventListener('click', () => openTaskDialo
 document.getElementById('cancelDialog').addEventListener('click', () => document.getElementById('taskDialog').close())
 document.getElementById('taskForm').addEventListener('submit', handleFormSubmit)
 document.getElementById('authButton').addEventListener('click', handleAuth)
+document.getElementById('cancelAuth').addEventListener('click', closeAuthDialog)
+document.getElementById('sendOtp').addEventListener('click', sendOtp)
+document.getElementById('authForm').addEventListener('submit', verifyOtp)
 
 async function initAuth() {
   if (await handleAuthCallback()) return

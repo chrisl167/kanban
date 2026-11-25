@@ -35,6 +35,21 @@
       </main>
     </div>
 
+    <dialog id="authDialog">
+      <form id="authForm">
+        <h3>邮箱验证码登录</h3>
+        <p class="auth-hint">输入邮箱后发送 6 位验证码；验证码将通过邮件发送，不需要点击跳转链接。</p>
+        <label>邮箱<input name="email" type="email" autocomplete="email" required maxlength="120" /></label>
+        <label class="otp-field">6 位验证码<input name="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" /></label>
+        <p class="auth-message" id="authMessage"></p>
+        <div class="dialog-actions">
+          <button type="button" class="secondary" id="cancelAuth">取消</button>
+          <button type="button" class="secondary" id="sendOtp">发送验证码</button>
+          <button type="submit" class="primary" id="verifyOtp">登录</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="taskDialog">
       <form id="taskForm" method="dialog">
         <h3 id="dialogTitle">新增事项</h3>

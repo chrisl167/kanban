@@ -18,27 +18,39 @@ create table if not exists public.kanban_tasks (
 
 alter table public.kanban_tasks enable row level security;
 
--- 登录用户只能读写自己的任务
-create policy "Users can read own tasks"
-  on public.kanban_tasks for select
-  to authenticated
-  using (auth.uid() = user_id);
+-- 登录用户只能读写自己的任务；策略使用 if not exists，便于重复执行本脚本
+do $$
+begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'kanban_tasks' and policyname = 'Users can read own tasks') then
+    create policy "Users can read own tasks"
+      on public.kanban_tasks for select
+      to authenticated
+      using (auth.uid() = user_id);
+  end if;
 
-create policy "Users can insert own tasks"
-  on public.kanban_tasks for insert
-  to authenticated
-  with check (auth.uid() = user_id);
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'kanban_tasks' and policyname = 'Users can insert own tasks') then
+    create policy "Users can insert own tasks"
+      on public.kanban_tasks for insert
+      to authenticated
+      with check (auth.uid() = user_id);
+  end if;
 
-create policy "Users can update own tasks"
-  on public.kanban_tasks for update
-  to authenticated
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'kanban_tasks' and policyname = 'Users can update own tasks') then
+    create policy "Users can update own tasks"
+      on public.kanban_tasks for update
+      to authenticated
+      using (auth.uid() = user_id)
+      with check (auth.uid() = user_id);
+  end if;
 
-create policy "Users can delete own tasks"
-  on public.kanban_tasks for delete
-  to authenticated
-  using (auth.uid() = user_id);
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'kanban_tasks' and policyname = 'Users can delete own tasks') then
+    create policy "Users can delete own tasks"
+      on public.kanban_tasks for delete
+      to authenticated
+      using (auth.uid() = user_id);
+  end if;
+end
+$$;
 
 create index if not exists idx_kanban_tasks_user_status on public.kanban_tasks(user_id, status);
 create index if not exists idx_kanban_tasks_due_date on public.kanban_tasks(due_date);

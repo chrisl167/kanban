@@ -59,7 +59,15 @@ npm run build
 
 ### GitHub Pages
 
-项目已配置 `base: '/kanban/'`，适合仓库名为 `kanban` 的 Pages 地址。可通过 GitHub Actions 自动构建部署，或手动把 `dist/` 内容发布到 Pages。
+项目已配置 `base: '/kanban/'`，并内置 `.github/workflows/deploy-pages.yml`。推送 `main` 分支后：
+
+1. 在仓库 **Settings → Pages** 的 **Build and deployment** 中，Source 选择 **GitHub Actions**。
+2. 在仓库 **Settings → Secrets and variables → Actions** 中配置两个公开前端变量：
+   - `VITE_SUPABASE_URL`：Supabase 项目 URL
+   - `VITE_SUPABASE_ANON_KEY`：Supabase publishable/anon/public key
+3. Actions 完成后访问 `https://chrisl167.github.io/kanban/`。
+
+注意：GitHub Pages 只托管静态前端；云端登录和跨设备同步由 Supabase 提供。
 
 ### Vercel / Netlify
 

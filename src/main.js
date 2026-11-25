@@ -36,8 +36,10 @@ async function handleAuthCallback() {
   const type = params.get('type') || hashParams.get('type') || 'email'
 
   const statusEl = document.getElementById('cloudStatus')
+  const statusTextEl = document.getElementById('cloudStatusText')
   const showStatus = (text) => {
     if (statusEl) statusEl.textContent = text
+    if (statusTextEl) statusTextEl.textContent = text
   }
 
   try {
@@ -109,7 +111,7 @@ async function syncTasks() {
 
   if (error) {
     console.warn('Supabase 读取失败，继续使用本地数据', error.message)
-    document.getElementById('cloudStatus').textContent = '云端读取失败，当前使用本地缓存。'
+    setCloudStatus('云端读取失败', '当前使用本地缓存。', 'local')
     render()
     return
   }
@@ -151,6 +153,16 @@ async function deleteTaskFromCloud(task) {
   }
 }
 
+function setCloudStatus(label, detail, tone = 'local') {
+  const status = document.getElementById('cloudStatus')
+  const statusText = document.getElementById('cloudStatusText')
+  if (status) {
+    status.textContent = label
+    status.className = `status-pill ${tone}`
+  }
+  if (statusText) statusText.textContent = detail
+}
+
 function renderStats() {
   const total = tasks.length
   const done = tasks.filter(t => t.status === 'done').length
@@ -170,13 +182,12 @@ function renderStats() {
 
   document.getElementById('todayList').innerHTML = todayTasks
     .filter(t => t.status !== 'done')
-    .map(t => `<li>${t.due_time ? `<span class="time">${t.due_time}</span>` : ''} ${escapeHtml(t.title)}</li>`)
+    .map(t => `<li>${t.due_time ? `<span class="time">${t.due_time}</span>` : ''} <span>${escapeHtml(t.title)}</span></li>`)
     .join('') || '<li>今天没有待处理事项</li>'
 
-  const status = document.getElementById('cloudStatus')
-  if (!supabaseEnabled) status.textContent = '本地模式：未配置 Supabase，记录保存在当前浏览器。'
-  else if (!currentUser) status.textContent = '未登录：当前使用本地缓存；登录后可云端同步。'
-  else status.textContent = `云端已连接：当前账号 ${currentUser.email || currentUser.id}`
+  if (!supabaseEnabled) setCloudStatus('本地模式', '未配置 Supabase，记录保存在当前浏览器。', 'local')
+  else if (!currentUser) setCloudStatus('未登录', '当前使用本地缓存；登录后可云端同步。', 'local')
+  else setCloudStatus('云端已连接', `当前账号 ${currentUser.email || currentUser.id}`, 'online')
 }
 
 function escapeHtml(text) {
@@ -185,18 +196,44 @@ function escapeHtml(text) {
   }[ch]))
 }
 
+function formatDue(task) {
+  if (!task.due_date && !task.due_time) return ''
+  const dateText = task.due_date || ''
+  const timeText = task.due_time || ''
+  return [dateText, timeText].filter(Boolean).join(' ')
+}
+
+function dueState(task) {
+  if (task.status === 'done' || !task.due_date) return ''
+  const today = new Date().toISOString().slice(0, 10)
+  if (task.due_date < today) return 'overdue'
+  if (task.due_date === today) return 'today'
+  return ''
+}
+
 function taskCard(task) {
   const priorityMap = { low: '低', normal: '普通', high: '高', urgent: '紧急' }
   const categoryMap = { medication: '服药', work: '工作', personal: '个人', other: '其他' }
+  const state = dueState(task)
+  const cardClass = ['card', state, task.status === 'done' ? 'done' : ''].filter(Boolean).join(' ')
+  const dueText = formatDue(task)
+  const tagsHtml = task.tags?.length
+    ? `<div class="tags">${task.tags.map(tag => `<span>#${escapeHtml(tag)}</span>`).join('')}</div>`
+    : ''
   return `
-    <article class="card" draggable="true" data-id="${task.id}">
+    <article class="${cardClass}" draggable="true" data-id="${task.id}">
       <div class="card-top">
-        <span class="badge ${task.category}">${categoryMap[task.category]}</span>
-        <span class="priority ${task.priority}">${priorityMap[task.priority]}</span>
+        <div class="badges">
+          <span class="badge ${task.category}">${categoryMap[task.category]}</span>
+          <span class="priority ${task.priority}">${priorityMap[task.priority]}</span>
+        </div>
       </div>
       <h4>${escapeHtml(task.title)}</h4>
       <p>${escapeHtml(task.description)}</p>
-      <div class="tags">${task.tags.map(tag => `<span>#${escapeHtml(tag)}</span>`).join('')}</div>
+      ${tagsHtml}
+      <div class="card-meta">
+        ${dueText ? `<span class="due-meta ${state}">${escapeHtml(dueText)}</span>` : ''}
+      </div>
       <div class="card-actions">
         <button data-action="edit">编辑</button>
         <button data-action="move" data-status="todo">待办</button>
@@ -212,10 +249,14 @@ function renderBoard() {
   const board = document.getElementById('board')
   board.innerHTML = columns.map(col => {
     const list = tasks.filter(t => t.status === col.key)
+    const empty = list.length ? '' : '<div class="empty-column">暂无事项，拖拽卡片到这里或新增事项</div>'
     return `
       <section class="column" data-status="${col.key}">
-        <h3>${col.label} <span>${list.length}</span></h3>
-        <div class="dropzone">${list.map(taskCard).join('')}</div>
+        <div class="column-head">
+          <h3>${col.label}</h3>
+          <span class="column-count">${list.length}</span>
+        </div>
+        <div class="dropzone">${list.map(taskCard).join('')}${empty}</div>
       </section>
     `
   }).join('')
@@ -257,12 +298,19 @@ function renderBoard() {
 function bindDragDrop() {
   document.querySelectorAll('.card').forEach(card => {
     card.addEventListener('dragstart', e => {
+      card.classList.add('dragging')
       e.dataTransfer.setData('text/plain', card.dataset.id)
     })
+    card.addEventListener('dragend', () => card.classList.remove('dragging'))
   })
   document.querySelectorAll('.dropzone').forEach(zone => {
-    zone.addEventListener('dragover', e => e.preventDefault())
+    zone.addEventListener('dragover', e => {
+      e.preventDefault()
+      zone.classList.add('dragover')
+    })
+    zone.addEventListener('dragleave', () => zone.classList.remove('dragover'))
     zone.addEventListener('drop', e => {
+      zone.classList.remove('dragover')
       e.preventDefault()
       const id = e.dataTransfer.getData('text/plain')
       const status = zone.closest('.column').dataset.status

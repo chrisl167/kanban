@@ -18,6 +18,10 @@ create table if not exists public.kanban_tasks (
 
 alter table public.kanban_tasks enable row level security;
 
+-- 前端客户端角色通过 RLS 策略获得本人数据权限；anon 仅保留只读，登录用户可增删改查
+grant select on public.kanban_tasks to anon;
+grant select, insert, update, delete on public.kanban_tasks to authenticated;
+
 -- 登录用户只能读写自己的任务；策略使用 if not exists，便于重复执行本脚本
 do $$
 begin

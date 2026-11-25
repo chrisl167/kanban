@@ -390,8 +390,7 @@ function setAuthMessage(text, isError = false) {
 function openAuthDialog() {
   const form = document.getElementById('authForm')
   form.email.value = pendingEmail || ''
-  form.otp.value = ''
-  setAuthMessage('输入邮箱后点击“发送验证码”，再填写邮件中的 6 位数字。')
+  setAuthMessage('输入邮箱后点击“发送登录链接”，再在同一浏览器里打开邮件并点击链接。')
   document.getElementById('authDialog').showModal()
 }
 
@@ -409,7 +408,7 @@ async function sendOtp() {
   }
 
   pendingEmail = email
-  setAuthMessage('正在发送验证码……')
+  setAuthMessage('正在发送登录链接……')
   const redirectTo = `${window.location.origin}${BASE_URL.replace(/\/$/, '')}/auth/callback.html`
   const { error } = await supabase.auth.signInWithOtp({
     email,
@@ -420,44 +419,11 @@ async function sendOtp() {
   })
 
   if (error) {
-    setAuthMessage(`验证码发送失败：${error.message}`, true)
+    setAuthMessage(`登录链接发送失败：${error.message}`, true)
     return
   }
 
-  setAuthMessage(`验证码已发送到 ${email}；如果邮件里只有链接，请先到 Supabase 邮件模板中开启 6 位验证码。`)
-}
-
-async function verifyOtp(event) {
-  event.preventDefault()
-  const form = document.getElementById('authForm')
-  const email = form.email.value.trim().toLowerCase()
-  const otp = form.otp.value.trim()
-
-  if (!email) {
-    setAuthMessage('请先输入登录邮箱。', true)
-    return
-  }
-  if (!/^[0-9]{6}$/.test(otp)) {
-    setAuthMessage('请输入邮件中的 6 位数字验证码。', true)
-    return
-  }
-
-  pendingEmail = email
-  setAuthMessage('正在验证验证码……')
-  const { data, error } = await supabase.auth.verifyOtp({
-    email,
-    token: otp,
-    type: 'email'
-  })
-
-  if (error) {
-    setAuthMessage(`验证码错误或已过期：${error.message}`, true)
-    return
-  }
-
-  currentUser = data.session?.user || null
-  closeAuthDialog()
-  render()
+  setAuthMessage(`登录链接已发送到 ${email}，请在同一浏览器的邮件里点击 Sign in 链接。`)
 }
 
 async function handleAuth() {
@@ -488,7 +454,7 @@ document.getElementById('taskForm').addEventListener('submit', handleFormSubmit)
 document.getElementById('authButton').addEventListener('click', handleAuth)
 document.getElementById('cancelAuth').addEventListener('click', closeAuthDialog)
 document.getElementById('sendOtp').addEventListener('click', sendOtp)
-document.getElementById('authForm').addEventListener('submit', verifyOtp)
+document.getElementById('authForm').addEventListener('submit', event => event.preventDefault())
 
 async function initAuth() {
   if (await handleAuthCallback()) return

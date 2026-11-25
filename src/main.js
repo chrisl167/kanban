@@ -27,12 +27,13 @@ async function handleAuthCallback() {
   if (!supabaseEnabled || !supabase) return false
 
   const path = normalizePath(window.location.pathname)
-  if (path !== '/auth/callback') return false
+  if (!path.match(/^\/auth\/callback(\.html)?$/)) return false
 
   const params = new URLSearchParams(window.location.search)
   const hashParams = new URLSearchParams(window.location.hash.slice(1))
   const code = params.get('code') || hashParams.get('code')
   const tokenHash = params.get('token_hash') || hashParams.get('token_hash')
+  const accessToken = params.get('access_token') || hashParams.get('access_token')
   const type = params.get('type') || hashParams.get('type') || 'email'
 
   const statusEl = document.getElementById('cloudStatus')
@@ -50,8 +51,18 @@ async function handleAuthCallback() {
       const email = params.get('email') || hashParams.get('email')
       const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type, email })
       if (error) throw error
+    } else if (accessToken) {
+      const refreshToken = params.get('refresh_token') || hashParams.get('refresh_token')
+      const expiresIn = Number(params.get('expires_in') || hashParams.get('expires_in') || 3600)
+      const tokenType = params.get('token_type') || hashParams.get('token_type') || 'bearer'
+      await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken || '',
+        expires_in: expiresIn,
+        token_type: tokenType
+      })
     } else {
-      showStatus('登录回调缺少 code 或 token_hash，请重新发送登录邮件。')
+      showStatus('登录回调缺少 code、token_hash 或 access_token，请重新发送登录邮件。')
       return true
     }
 
@@ -399,9 +410,13 @@ async function sendOtp() {
 
   pendingEmail = email
   setAuthMessage('正在发送验证码……')
+  const redirectTo = `${window.location.origin}${BASE_URL.replace(/\/$/, '')}/auth/callback.html`
   const { error } = await supabase.auth.signInWithOtp({
     email,
-    options: { shouldCreateUser: true }
+    options: {
+      shouldCreateUser: true,
+      emailRedirectTo: redirectTo
+    }
   })
 
   if (error) {
@@ -409,7 +424,7 @@ async function sendOtp() {
     return
   }
 
-  setAuthMessage(`验证码已发送到 ${email}，请查看邮件并填写 6 位数字。`)
+  setAuthMessage(`验证码已发送到 ${email}；如果邮件里只有链接，请先到 Supabase 邮件模板中开启 6 位验证码。`)
 }
 
 async function verifyOtp(event) {

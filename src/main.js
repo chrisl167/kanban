@@ -54,7 +54,7 @@ async function handleAuthCallback() {
 
     const { data } = await supabase.auth.getSession()
     currentUser = data.session?.user || null
-    const home = `${BASE_URL}`
+    const home = `${BASE_URL.replace(/\/$/, '')}/`
     window.history.replaceState({}, '', home)
     showStatus(currentUser ? `云端已连接：当前账号 ${currentUser.email || currentUser.id}` : '登录完成。')
     render()

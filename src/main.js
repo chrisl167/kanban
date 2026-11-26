@@ -3,6 +3,7 @@ import { api, clearSession, getStoredUser, saveSession } from './api.js'
 import { defaultTasks } from './defaultTasks.js'
 
 const STORAGE_KEY = 'kanban-med-board-v1'
+const DEFAULT_TITLE = '服药与工作看板'
 const columns = [
   { key: 'todo', label: '待办' },
   { key: 'doing', label: '进行中' },
@@ -14,6 +15,8 @@ let currentUser = getStoredUser()
 let editingId = null
 let pendingEmail = ''
 let allowRegistration = true
+let forcedPasswordChange = false
+let systemThemeWatcher = null
 
 function loadLocalTasks() {
   try {
@@ -55,7 +58,7 @@ async function syncTasks() {
     const remoteTasks = await api.listTasks()
     tasks = remoteTasks.length ? remoteTasks.map(normalizeTask) : structuredClone(defaultTasks)
     persistLocal()
-    setCloudStatus('服务器已连接', `当前账号 ${currentUser.email || currentUser.id}`, 'online')
+    setCloudStatus('服务器已连接', `当前账号 ${currentUser.display_name || currentUser.email}`, 'online')
   } catch (error) {
     console.warn('服务器读取失败，继续使用本地数据', error.message)
     setCloudStatus('服务器读取失败', '当前使用本地缓存。', 'local')
@@ -123,6 +126,55 @@ async function loadAuthConfig() {
   if (registerButton) registerButton.style.display = allowRegistration ? '' : 'none'
 }
 
+function applyTheme(theme) {
+  const systemDark = window.matchMedia('(prefers-color-scheme: dark)')
+  const resolved = theme === 'dark' || (theme === 'system' && systemDark.matches) ? 'dark' : 'light'
+  document.documentElement.dataset.theme = resolved
+
+  if (systemThemeWatcher) systemThemeWatcher.removeEventListener('change', systemThemeWatcher)
+  systemThemeWatcher = null
+
+  if (theme === 'system') {
+    systemThemeWatcher = () => applyTheme('system')
+    systemDark.addEventListener('change', systemThemeWatcher)
+  }
+}
+
+function applyProfile() {
+  const title = currentUser?.board_title || DEFAULT_TITLE
+  document.getElementById('boardTitle').textContent = title
+  document.title = title
+  applyTheme(currentUser?.theme || 'system')
+
+  const profileButton = document.getElementById('profileButton')
+  const authButton = document.getElementById('authButton')
+  profileButton.hidden = !currentUser
+  authButton.textContent = currentUser ? (currentUser.display_name || currentUser.email) : '登录'
+
+  const profileMeta = document.getElementById('profileMeta')
+  if (currentUser) {
+    profileMeta.innerHTML = `
+      <div><span>邮箱</span><b>${escapeHtml(currentUser.email)}</b></div>
+      <div><span>昵称</span><b>${escapeHtml(currentUser.display_name || '未设置')}</b></div>
+    `
+    const form = document.getElementById('profileForm')
+    form.display_name.value = currentUser.display_name || ''
+    form.board_title.value = currentUser.board_title || DEFAULT_TITLE
+    form.theme.value = currentUser.theme || 'system'
+  }
+}
+
+async function refreshProfile() {
+  if (!currentUser) return
+  try {
+    currentUser = await api.getMe()
+    saveSession({ user: currentUser })
+    applyProfile()
+  } catch (error) {
+    console.warn('读取账号资料失败', error.message)
+  }
+}
+
 function renderStats() {
   const total = tasks.length
   const done = tasks.filter(t => t.status === 'done').length
@@ -133,12 +185,13 @@ function renderStats() {
   const rate = total ? Math.round(done / total * 100) : 0
 
   document.getElementById('stats').innerHTML = `
-    <div class="stat-card"><b>${total}</b><span>总事项</span></div>
-    <div class="stat-card"><b>${doing}</b><span>进行中</span></div>
-    <div class="stat-card"><b>${done}</b><span>已完成</span></div>
-    <div class="stat-card"><b>${overdue.length}</b><span>逾期</span></div>
-    <div class="stat-card"><b>${rate}%</b><span>完成率</span></div>
+    <div class="stat-card"><span class="stat-label">总事项</span><b>${total}</b></div>
+    <div class="stat-card"><span class="stat-label">进行中</span><b>${doing}</b></div>
+    <div class="stat-card"><span class="stat-label">已完成</span><b>${done}</b></div>
+    <div class="stat-card"><span class="stat-label">逾期</span><b class="danger-text">${overdue.length}</b></div>
+    <div class="stat-card stat-rate"><span class="stat-label">完成率</span><b>${rate}%</b></div>
   `
+  document.getElementById('progressBar').style.width = `${rate}%`
 
   document.getElementById('todayList').innerHTML = todayTasks
     .filter(t => t.status !== 'done')
@@ -146,7 +199,7 @@ function renderStats() {
     .join('') || '<li>今天没有待处理事项</li>'
 
   if (!currentUser) setCloudStatus('未登录', '当前使用本地缓存；登录后可同步到 SQLite 服务器。', 'local')
-  else setCloudStatus('服务器已连接', `当前账号 ${currentUser.email || currentUser.id}`, 'online')
+  else setCloudStatus('服务器已连接', `当前账号 ${currentUser.display_name || currentUser.email}`, 'online')
 }
 
 function escapeHtml(text) {
@@ -170,6 +223,20 @@ function dueState(task) {
   return ''
 }
 
+function emptyIllustration(label) {
+  return `
+    <div class="empty-state">
+      <svg viewBox="0 0 160 110" role="img" aria-label="${escapeHtml(label)}">
+        <circle cx="80" cy="56" r="38" fill="var(--surface-subtle)" />
+        <rect x="48" y="34" width="64" height="44" rx="10" fill="var(--surface)" stroke="var(--line-strong)" />
+        <rect x="56" y="44" width="38" height="7" rx="3.5" fill="var(--primary-soft)" />
+        <rect x="56" y="58" width="26" height="7" rx="3.5" fill="var(--line)" />
+        <path d="M112 42l10 10-10 10" fill="none" stroke="var(--subtle)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      <p>${escapeHtml(label)}</p>
+    </div>`
+}
+
 function taskCard(task) {
   const priorityMap = { low: '低', normal: '普通', high: '高', urgent: '紧急' }
   const categoryMap = { medication: '服药', work: '工作', personal: '个人', other: '其他' }
@@ -181,6 +248,7 @@ function taskCard(task) {
     : ''
   return `
     <article class="${cardClass}" draggable="true" data-id="${task.id}">
+      <span class="drag-handle" title="拖拽卡片">⋮⋮</span>
       <div class="card-top">
         <div class="badges">
           <span class="badge ${task.category}">${categoryMap[task.category]}</span>
@@ -191,14 +259,14 @@ function taskCard(task) {
       <p>${escapeHtml(task.description)}</p>
       ${tagsHtml}
       <div class="card-meta">
-        ${dueText ? `<span class="due-meta ${state}">${escapeHtml(dueText)}</span>` : ''}
+        ${dueText ? `<span class="due-meta ${state}">${escapeHtml(dueText)}</span>` : '<span class="due-meta muted">未设置截止时间</span>'}
       </div>
       <div class="card-actions">
-        <button data-action="edit">编辑</button>
-        <button data-action="move" data-status="todo">待办</button>
-        <button data-action="move" data-status="doing">进行中</button>
-        <button data-action="move" data-status="done">完成</button>
-        <button data-action="delete" class="danger">删除</button>
+        <button type="button" data-action="edit" title="编辑事项">编辑</button>
+        <button type="button" data-action="move" data-status="todo" title="移到待办">待办</button>
+        <button type="button" data-action="move" data-status="doing" title="移到进行中">进行中</button>
+        <button type="button" data-action="move" data-status="done" title="标记完成">完成</button>
+        <button type="button" data-action="delete" class="danger" title="删除事项">删除</button>
       </div>
     </article>
   `
@@ -208,7 +276,7 @@ function renderBoard() {
   const board = document.getElementById('board')
   board.innerHTML = columns.map(col => {
     const list = tasks.filter(t => t.status === col.key)
-    const empty = list.length ? '' : '<div class="empty-column">暂无事项，拖拽卡片到这里或新增事项</div>'
+    const empty = list.length ? '' : emptyIllustration(col.key === 'done' ? '已完成的事项会显示在这里' : '暂无事项，拖拽卡片到这里或新增事项')
     return `
       <section class="column" data-status="${col.key}">
         <div class="column-head">
@@ -258,13 +326,16 @@ function bindDragDrop() {
   document.querySelectorAll('.card').forEach(card => {
     card.addEventListener('dragstart', e => {
       card.classList.add('dragging')
+      e.dataTransfer.effectAllowed = 'move'
       e.dataTransfer.setData('text/plain', card.dataset.id)
     })
     card.addEventListener('dragend', () => card.classList.remove('dragging'))
   })
+
   document.querySelectorAll('.dropzone').forEach(zone => {
     zone.addEventListener('dragover', e => {
       e.preventDefault()
+      e.dataTransfer.dropEffect = 'move'
       zone.classList.add('dragover')
     })
     zone.addEventListener('dragleave', () => zone.classList.remove('dragover'))
@@ -275,7 +346,20 @@ function bindDragDrop() {
       const status = zone.closest('.column').dataset.status
       const task = tasks.find(t => t.id === id)
       if (!task) return
+
+      const cards = [...zone.querySelectorAll('.card:not(.dragging)')]
+      const afterCard = cards.find(card => e.clientY < card.getBoundingClientRect().top + card.offsetHeight / 2)
+      tasks = tasks.filter(t => t.id !== task.id)
       task.status = status
+
+      if (afterCard) {
+        const afterTask = tasks.find(t => t.id === afterCard.dataset.id)
+        const index = afterTask ? tasks.indexOf(afterTask) + 1 : tasks.length
+        tasks.splice(index, 0, task)
+      } else {
+        tasks.unshift(task)
+      }
+
       persistLocal()
       saveTaskToServer(task)
       render()
@@ -335,6 +419,13 @@ function setAuthMessage(text, isError = false) {
   el.classList.toggle('error', Boolean(isError))
 }
 
+function setPasswordMessage(text, isError = false) {
+  const el = document.getElementById('passwordMessage')
+  if (!el) return
+  el.textContent = text || ''
+  el.classList.toggle('error', Boolean(isError))
+}
+
 function openAuthDialog(mode = 'login') {
   const form = document.getElementById('authForm')
   form.email.value = pendingEmail || ''
@@ -372,6 +463,12 @@ async function submitAuth(event) {
     currentUser = session.user
     closeAuthDialog()
     await syncTasks()
+    if (currentUser.must_change_password) {
+      forcedPasswordChange = true
+      openPasswordDialog(true)
+    } else {
+      await refreshProfile()
+    }
   } catch (error) {
     setAuthMessage(error.message || '登录失败', true)
   }
@@ -387,12 +484,86 @@ async function handleAuth() {
     clearSession()
     currentUser = null
     pendingEmail = ''
+    forcedPasswordChange = false
     tasks = structuredClone(defaultTasks)
     persistLocal()
+    applyProfile()
     render()
     return
   }
   openAuthDialog('login')
+}
+
+function openPasswordDialog(forced = false) {
+  forcedPasswordChange = forced
+  const form = document.getElementById('passwordForm')
+  form.reset()
+  setPasswordMessage('')
+  document.getElementById('passwordDialogTitle').textContent = forced ? '首次登录，请修改密码' : '修改密码'
+  document.getElementById('passwordHint').textContent = forced
+    ? '这是账号的初始密码，为保障安全，请先设置一个新的登录密码。'
+    : '修改后请使用新密码登录；当前会话会自动保留。'
+  document.getElementById('cancelPassword').hidden = forced
+  document.getElementById('passwordDialog').showModal()
+}
+
+async function submitPassword(event) {
+  event.preventDefault()
+  const form = event.target
+  const oldPassword = form.old_password.value
+  const newPassword = form.new_password.value
+  const confirmPassword = form.confirm_password.value
+
+  if (newPassword.length < 6) {
+    setPasswordMessage('新密码至少需要 6 位。', true)
+    return
+  }
+  if (newPassword !== confirmPassword) {
+    setPasswordMessage('两次输入的新密码不一致。', true)
+    return
+  }
+  if (newPassword === oldPassword) {
+    setPasswordMessage('新密码不能与当前密码相同。', true)
+    return
+  }
+
+  setPasswordMessage('正在保存新密码……')
+  try {
+    const result = await api.changePassword({ old_password: oldPassword, new_password: newPassword })
+    currentUser = result.user
+    saveSession({ user: currentUser })
+    applyProfile()
+    document.getElementById('passwordDialog').close()
+    forcedPasswordChange = false
+  } catch (error) {
+    setPasswordMessage(error.message || '修改密码失败', true)
+  }
+}
+
+function openProfileDialog() {
+  if (!currentUser) return
+  applyProfile()
+  document.getElementById('profileDialog').showModal()
+}
+
+async function submitProfile(event) {
+  event.preventDefault()
+  const form = event.target
+  const body = {
+    display_name: form.display_name.value.trim(),
+    board_title: form.board_title.value.trim(),
+    theme: form.theme.value
+  }
+
+  try {
+    currentUser = await api.updateProfile(body)
+    saveSession({ user: currentUser })
+    applyProfile()
+    render()
+    document.getElementById('profileDialog').close()
+  } catch (error) {
+    setCloudStatus('保存失败', error.message, 'local')
+  }
 }
 
 function render() {
@@ -407,15 +578,34 @@ document.getElementById('authButton').addEventListener('click', handleAuth)
 document.getElementById('cancelAuth').addEventListener('click', closeAuthDialog)
 document.getElementById('authForm').addEventListener('submit', submitAuth)
 document.getElementById('authRegister').addEventListener('click', () => openAuthDialog('register'))
-
-function updateAuthButton() {
-  document.getElementById('authButton').textContent = currentUser ? '退出登录' : '登录'
-}
+document.getElementById('profileButton').addEventListener('click', openProfileDialog)
+document.getElementById('profileForm').addEventListener('submit', submitProfile)
+document.getElementById('cancelProfile').addEventListener('click', () => document.getElementById('profileDialog').close())
+document.getElementById('openPasswordFromProfile').addEventListener('click', () => {
+  document.getElementById('profileDialog').close()
+  openPasswordDialog(false)
+})
+document.getElementById('passwordForm').addEventListener('submit', submitPassword)
+document.getElementById('cancelPassword').addEventListener('click', () => {
+  if (!forcedPasswordChange) document.getElementById('passwordDialog').close()
+})
+document.getElementById('passwordDialog').addEventListener('cancel', event => {
+  if (forcedPasswordChange) event.preventDefault()
+})
 
 async function initApp() {
+  applyProfile()
   updateAuthButton()
   await loadAuthConfig()
   await syncTasks()
+  if (currentUser?.must_change_password) {
+    forcedPasswordChange = true
+    openPasswordDialog(true)
+  }
+}
+
+function updateAuthButton() {
+  document.getElementById('authButton').textContent = currentUser ? (currentUser.display_name || currentUser.email) : '登录'
 }
 
 initApp()

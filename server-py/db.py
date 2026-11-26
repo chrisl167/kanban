@@ -3,7 +3,7 @@ import json
 import os
 import sqlite3
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 DATA_DIR = Path(os.environ.get("KANBAN_DATA_DIR", "/opt/kanban/data"))
@@ -15,6 +15,10 @@ CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    board_title TEXT NOT NULL DEFAULT '服药与工作看板',
+    theme TEXT NOT NULL DEFAULT 'system',
+    must_change_password INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -46,6 +50,13 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON tasks(user_id, status, sort_order);
 """
 
+USER_COLUMNS = {
+    "display_name": "TEXT NOT NULL DEFAULT ''",
+    "board_title": "TEXT NOT NULL DEFAULT '服药与工作看板'",
+    "theme": "TEXT NOT NULL DEFAULT 'system'",
+    "must_change_password": "INTEGER NOT NULL DEFAULT 0",
+}
+
 
 def now_iso():
     return datetime.now().isoformat(timespec="seconds")
@@ -63,6 +74,28 @@ def connect():
 def init_db():
     with connect() as con:
         con.executescript(SCHEMA)
+        existing = {row["name"] for row in con.execute("PRAGMA table_info(users)")}
+        migrated = False
+        for column, declaration in USER_COLUMNS.items():
+            if column not in existing:
+                con.execute(f"ALTER TABLE users ADD COLUMN {column} {declaration}")
+                migrated = True
+        if migrated:
+            con.execute("UPDATE users SET must_change_password = 1 WHERE must_change_password = 0")
+
+
+def user_profile(row):
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "email": row["email"],
+        "display_name": row["display_name"] or "",
+        "board_title": row["board_title"] or "服药与工作看板",
+        "theme": row["theme"] or "system",
+        "must_change_password": bool(row["must_change_password"]),
+        "created_at": row["created_at"],
+    }
 
 
 def normalize_task(row):

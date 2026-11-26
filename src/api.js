@@ -49,7 +49,7 @@ async function request(path, options = {}) {
   }
 
   if (!response.ok) {
-    const message = data?.error || `请求失败（${response.status}）`
+    const message = data?.error || data?.detail || `请求失败（${response.status}）`
     throw new Error(message)
   }
 
@@ -61,6 +61,9 @@ export const api = {
   register: (body) => request('/api/auth/register', { method: 'POST', body }),
   login: (body) => request('/api/auth/login', { method: 'POST', body }),
   logout: () => request('/api/auth/logout', { method: 'POST' }),
+  getMe: () => request('/api/me'),
+  updateProfile: (body) => request('/api/me', { method: 'PUT', body }),
+  changePassword: (body) => request('/api/auth/password/change', { method: 'POST', body }),
   listTasks: () => request('/api/tasks'),
   createTask: (body) => request('/api/tasks', { method: 'POST', body }),
   updateTask: (id, body) => request(`/api/tasks/${id}`, { method: 'PUT', body }),

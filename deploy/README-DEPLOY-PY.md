@@ -32,7 +32,7 @@ cd /opt/kanban/server-py
 KANBAN_DATA_DIR=/mnt/sata2-4/kanban/data python3 adduser.py you@example.com
 ```
 
-密码至少 6 位；不要把密码写入仓库、前端或部署包。
+默认创建的账号首次登录会强制修改初始密码；如不需要，可加 `--no-must-change`。密码至少 6 位；不要把密码写入仓库、前端或部署包。
 
 ## 4. 启动服务
 
@@ -52,6 +52,8 @@ curl --noproxy '*' http://127.0.0.1:8766/api/auth/config
 ```
 
 预期：健康检查返回 `{"ok":true,...}`；配置返回 `{"allowRegistration":false}`。局域网 Windows 访问 `http://192.168.31.242:8766/`。
+
+登录后可用接口：`GET /api/me` 读取账号资料与偏好；`PUT /api/me` 保存昵称、看板标题、主题；`POST /api/auth/password/change` 修改密码。账号级偏好保存在 SQLite 用户表中，换设备登录后同步。
 
 ## 5. 开机自启与 Tunnel 通知
 
@@ -83,6 +85,7 @@ SQLite 数据库位于 `/mnt/sata2-4/kanban/data/kanban.db`。定期复制 `kanb
 ## 8. 故障排查
 
 - 页面打开但接口 401：检查 localStorage 中 token 是否过期，重新登录。
+- 首次登录停留在修改密码：确认当前密码正确；新密码不少于 6 位，且两次输入一致，新密码不能与当前密码相同。
 - `/api/auth/config` 显示注册开启：检查启动环境变量 `ALLOW_REGISTRATION=false`。
 - 静态资源 404：确认 `/opt/kanban/app/index.html` 和 `/opt/kanban/app/assets` 存在。
 - 端口占用：查看 `ps w | grep run.py` 和 `/mnt/sata2-4/kanban/server.log`，必要时在 `run.py` 中改 `PORT`。

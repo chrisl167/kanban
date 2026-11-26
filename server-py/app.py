@@ -24,6 +24,17 @@ class AuthBody(BaseModel):
     password: str = Field(min_length=6, max_length=120)
 
 
+class ProfileBody(BaseModel):
+    display_name: str | None = Field(default=None, max_length=60)
+    board_title: str | None = Field(default=None, max_length=80)
+    theme: str | None = None
+
+
+class PasswordBody(BaseModel):
+    old_password: str = Field(min_length=6, max_length=120)
+    new_password: str = Field(min_length=6, max_length=120)
+
+
 class TaskBody(BaseModel):
     title: str | None = Field(default=None, max_length=80)
     description: str | None = None
@@ -58,9 +69,9 @@ def register(body: AuthBody):
     if not ALLOW_REGISTRATION:
         raise HTTPException(status_code=403, detail="注册已关闭；请联系管理员开通账号")
     email = body.email.strip().lower()
-    if auth.get_user_by_email(email):
+    if auth.get_user_with_hash(email):
         raise HTTPException(status_code=409, detail="邮箱已注册")
-    user = auth.create_user(email, body.password)
+    user = auth.create_user(email, body.password, must_change_password=False)
     token = auth.create_session(user["id"])
     return {"token": token, "user": user}
 
@@ -68,11 +79,11 @@ def register(body: AuthBody):
 @app.post("/api/auth/login")
 def login(body: AuthBody):
     email = body.email.strip().lower()
-    user = auth.get_user_by_email(email)
+    user = auth.get_user_with_hash(email)
     if not user or not auth.verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="邮箱或密码错误")
     token = auth.create_session(user["id"])
-    return {"token": token, "user": {"id": user["id"], "email": user["email"]}}
+    return {"token": token, "user": auth.get_profile(user["id"])}
 
 
 @app.post("/api/auth/logout")
@@ -80,6 +91,27 @@ def logout(authorization: str | None = Header(default=None), user=Depends(requir
     if authorization and authorization.startswith("Bearer "):
         auth.delete_session(authorization[7:].strip())
     return {"ok": True}
+
+
+@app.get("/api/me")
+def get_me(user=Depends(require_user)):
+    return auth.get_profile(user["id"])
+
+
+@app.put("/api/me")
+def update_profile(body: ProfileBody, user=Depends(require_user)):
+    return auth.update_profile(user["id"], body.model_dump(exclude_none=True))
+
+
+@app.post("/api/auth/password/change")
+def change_password(body: PasswordBody, user=Depends(require_user)):
+    if body.new_password == body.old_password:
+        raise HTTPException(status_code=400, detail="新密码不能与当前密码相同")
+    stored = auth.get_user_with_hash(user["email"])
+    if not stored or not auth.verify_password(body.old_password, stored["password_hash"]):
+        raise HTTPException(status_code=400, detail="当前密码不正确")
+    auth.update_password(user["id"], body.new_password)
+    return {"ok": True, "user": auth.get_profile(user["id"])}
 
 
 @app.get("/api/tasks")

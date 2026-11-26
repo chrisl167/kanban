@@ -16,6 +16,7 @@ let editingId = null
 let pendingEmail = ''
 let allowRegistration = true
 let forcedPasswordChange = false
+let systemThemeMedia = null
 let systemThemeWatcher = null
 
 function loadLocalTasks() {
@@ -131,10 +132,14 @@ function applyTheme(theme) {
   const resolved = theme === 'dark' || (theme === 'system' && systemDark.matches) ? 'dark' : 'light'
   document.documentElement.dataset.theme = resolved
 
-  if (systemThemeWatcher) systemThemeWatcher.removeEventListener('change', systemThemeWatcher)
+  if (systemThemeMedia && systemThemeWatcher) {
+    systemThemeMedia.removeEventListener('change', systemThemeWatcher)
+  }
+  systemThemeMedia = null
   systemThemeWatcher = null
 
   if (theme === 'system') {
+    systemThemeMedia = systemDark
     systemThemeWatcher = () => applyTheme('system')
     systemDark.addEventListener('change', systemThemeWatcher)
   }
@@ -144,7 +149,6 @@ function applyProfile() {
   const title = currentUser?.board_title || DEFAULT_TITLE
   document.getElementById('boardTitle').textContent = title
   document.title = title
-  applyTheme(currentUser?.theme || 'system')
 
   const profileButton = document.getElementById('profileButton')
   const authButton = document.getElementById('authButton')
@@ -162,6 +166,8 @@ function applyProfile() {
     form.board_title.value = currentUser.board_title || DEFAULT_TITLE
     form.theme.value = currentUser.theme || 'system'
   }
+
+  applyTheme(currentUser?.theme || 'system')
 }
 
 async function refreshProfile() {
@@ -532,9 +538,10 @@ async function submitPassword(event) {
     const result = await api.changePassword({ old_password: oldPassword, new_password: newPassword })
     currentUser = result.user
     saveSession({ user: currentUser })
-    applyProfile()
     document.getElementById('passwordDialog').close()
     forcedPasswordChange = false
+    setPasswordMessage('')
+    applyProfile()
   } catch (error) {
     setPasswordMessage(error.message || '修改密码失败', true)
   }

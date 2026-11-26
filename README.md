@@ -1,92 +1,104 @@
 # 服药与工作看板
 
-一个结合服药打卡与通用工作事项的看板：支持看板列、新增/编辑/删除、今日清单、进度统计、优先级与标签；未登录时使用本地缓存，登录 Supabase 后可云端同步。
+一个结合服药打卡与通用工作事项的三列看板：支持新增、编辑、删除、拖拽换列、今日清单、进度统计、优先级与标签。
 
-## 功能
+## 当前架构
 
-- 三列看板：待办、进行中、已完成
-- 默认预置本次 HP 根除治疗服药任务
-- 弹窗新增、编辑、删除工作/个人/服药事项
-- 查看总事项、进行中、已完成、逾期数量与完成率
-- 支持卡片按钮移动状态，也支持拖拽换列
-- Supabase Auth 邮件魔法链接登录，按用户隔离数据
-- 未配置 Supabase 时，数据保存在当前浏览器本地
-- 已适配 GitHub Pages 子路径 `/kanban/`
+```text
+浏览器前端（Vite + 原生 JavaScript）
+  ↓ /api/*
+Express 后端（Node.js）
+  ↓
+SQLite 文件数据库（better-sqlite3）
+```
 
-## 技术栈
-
-- 原生 JavaScript + Vite
-- Supabase JS Client（可选接入）
-- 无自建后端；静态前端 + Supabase 数据库
+- 前端：Vite、原生 JavaScript、CSS 设计令牌与响应式布局
+- 后端：Express、JWT 账号密码登录、`better-sqlite3`
+- 进程守护：PM2
+- 目标部署环境：iStoreOS 局域网服务器（192.168.x.242），外层通过 Cloudflare 命名 Tunnel 暴露长期域名
 
 ## 本地运行
 
+### 1. 安装依赖
+
 ```bash
 npm install
-npm run dev
+npm --prefix server install
 ```
 
-浏览器打开 Vite 输出的本地地址即可。
+### 2. 配置后端环境
 
-## 接入 Supabase
-
-1. 在 Supabase 新建项目，并在 Authentication 中开启邮箱登录。
-2. 在 SQL Editor 执行 `supabase/schema.sql`，创建 `kanban_tasks` 表、索引和 RLS 策略。
-3. 复制 `.env.example` 为 `.env.local`，填写：
-
-```env
-VITE_SUPABASE_URL=你的 Supabase 项目 URL
-VITE_SUPABASE_ANON_KEY=你的 anon/public key
+```bash
+cp server/.env.example server/.env
 ```
 
-4. 重新运行：
+生产或长期使用时，把 `JWT_SECRET` 改成随机长字符串：
+
+```bash
+openssl rand -hex 32
+```
+
+### 3. 启动后端
+
+```bash
+npm --prefix server run dev
+```
+
+后端默认监听：`http://127.0.0.1:3100`
+
+### 4. 启动前端
+
+另开一个终端：
 
 ```bash
 npm run dev
 ```
 
-5. 在页面点击“登录”，输入邮箱，通过 Supabase 邮件链接完成登录。
+Vite 会把 `/api` 请求代理到本地后端。
 
-## 构建与部署
-
-### 本地构建
+## 构建前端
 
 ```bash
 npm run build
 ```
 
-产物输出到 `dist/`。
+静态产物输出到 `dist/`。
 
-### GitHub Pages
+## 后端接口
 
-项目已配置 `base: '/kanban/'`，并内置 `.github/workflows/deploy-pages.yml`。推送 `main` 分支后：
+详见 [`server/README.md`](server/README.md)。
 
-1. 在仓库 **Settings → Pages** 的 **Build and deployment** 中，Source 选择 **GitHub Actions**。
-2. 在仓库 **Settings → Secrets and variables → Actions** 中配置两个公开前端变量：
-   - `VITE_SUPABASE_URL`：Supabase 项目 URL
-   - `VITE_SUPABASE_ANON_KEY`：Supabase publishable/anon/public key
-3. Actions 完成后访问 `https://chrisl167.github.io/kanban/`。
+主要接口：
 
-注意：GitHub Pages 只托管静态前端；云端登录和跨设备同步由 Supabase 提供。
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/auth/register` | 注册账号 |
+| POST | `/api/auth/login` | 登录并返回 JWT |
+| POST | `/api/auth/logout` | 退出登录 |
+| GET | `/api/tasks` | 获取当前用户任务 |
+| POST | `/api/tasks` | 新增任务 |
+| PUT | `/api/tasks/:id` | 编辑任务 |
+| DELETE | `/api/tasks/:id` | 删除任务 |
 
-### Vercel / Netlify
+## 部署到 iStoreOS 242
 
-连接 GitHub 仓库后，构建命令填 `npm run build`，发布目录填 `dist`；Supabase 环境变量在平台后台配置，不要提交到仓库。
+完整步骤、Cloudflare Tunnel 配置、备份和上线自检见 [`deploy/README-DEPLOY.md`](deploy/README-DEPLOY.md)。
+
+1. 在 iStoreOS 上安装 Node.js 20+ 和 PM2。
+2. 上传前端 `dist/` 与 `server/` 目录。
+3. 配置后端环境变量和 SQLite 持久化目录。
+4. 用 PM2 启动 `server/ecosystem.config.cjs`。
+5. Express 直接托管前端静态文件和 `/api` 接口，默认只监听 `127.0.0.1:3100`。
+6. 在现有 Cloudflare 命名 Tunnel 中新增看板 Hostname，指向 `127.0.0.1:3100`。
+7. 定期备份 SQLite 文件目录。
 
 ## 安全说明
 
-- 前端只应使用 `anon/public key`，不要把 `service_role key` 写进前端代码。
-- 数据库 RLS 已按 `auth.uid()` 限制用户只能访问本人数据。
-- 服药记录属于健康信息，公开部署前需要确认登录方式、数据范围和隐私策略。
-- 本地缓存只是离线兜底；跨设备同步以 Supabase 云端数据为准。
+- 密码只保存哈希，不保存明文。
+- JWT Secret 不能提交到仓库，也不能写进前端代码。
+- 服药记录属于健康信息；对外访问时必须保留账号密码登录，并在首个账号创建后关闭公开注册。
+- SQLite 数据库文件需要放在持久化目录，并纳入备份。
 
-## Git 推送示例
+## 历史说明
 
-```bash
-git init
-git add .
-git commit -m "feat: 看板待办、编辑删除与 Supabase 同步"
-git branch -M main
-git remote add origin https://github.com/chrisl167/kanban.git
-git push -u origin main
-```
+仓库早期版本曾使用 Supabase Auth + Supabase Postgres；当前版本已改为自建 Node + SQLite 方案。Supabase 相关文件已从当前工作区移除，历史记录可在 Git 历史中查阅。

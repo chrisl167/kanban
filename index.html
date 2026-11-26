@@ -46,13 +46,15 @@
 
     <dialog id="authDialog">
       <form id="authForm">
-        <h3>邮箱链接登录</h3>
-        <p class="auth-hint">输入邮箱后发送登录链接；请在同一台电脑、同一个浏览器里打开邮件并点击链接完成登录。</p>
+        <h3 id="authMode">账号登录</h3>
+        <p class="auth-hint">使用账号密码登录；任务数据将同步到 242 服务器上的 SQLite 数据库。</p>
         <label>邮箱<input name="email" type="email" autocomplete="email" required maxlength="120" /></label>
+        <label>密码<input name="password" type="password" autocomplete="current-password" required minlength="6" maxlength="120" /></label>
         <p class="auth-message" id="authMessage"></p>
         <div class="dialog-actions">
           <button type="button" class="secondary" id="cancelAuth">取消</button>
-          <button type="button" class="primary" id="sendOtp">发送登录链接</button>
+          <button type="button" class="secondary" id="authRegister">注册账号</button>
+          <button type="submit" class="primary" id="authSubmit">登录</button>
         </div>
       </form>
     </dialog>

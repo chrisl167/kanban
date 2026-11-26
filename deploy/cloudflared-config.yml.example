@@ -1,0 +1,19 @@
+# 命名 Tunnel 配置示例
+# 把 <TUNNEL_ID> 和凭证文件路径替换为 Cloudflare 后台生成的真实值。
+# 如果服务器上已有一个 Tunnel 在跑，优先在原 Tunnel 的 ingress 列表中追加本看板规则，
+# 不要重复创建第二个 Tunnel。
+
+tunnel: <TUNNEL_ID>
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  # 原有服务示例：保留你已经在跑的那条规则
+  # - hostname: old-app.example.com
+  #   service: http://127.0.0.1:8081
+
+  # 看板：Express 同时托管前端静态文件和 /api 接口
+  - hostname: kanban.example.com
+    service: http://127.0.0.1:3100
+
+  # 兜底规则；Cloudflare 要求最后一条必须匹配所有流量
+  - service: http://127.0.0.1:3100

@@ -1,9 +1,8 @@
 import './style.css'
-import { supabase, supabaseEnabled } from './supabase.js'
+import { api, clearSession, getStoredUser, saveSession } from './api.js'
 import { defaultTasks } from './defaultTasks.js'
 
 const STORAGE_KEY = 'kanban-med-board-v1'
-const BASE_URL = import.meta.env.BASE_URL || '/'
 const columns = [
   { key: 'todo', label: '待办' },
   { key: 'doing', label: '进行中' },
@@ -11,74 +10,10 @@ const columns = [
 ]
 
 let tasks = loadLocalTasks()
-let currentUser = null
+let currentUser = getStoredUser()
 let editingId = null
 let pendingEmail = ''
-
-function normalizePath(pathname) {
-  let path = pathname || '/'
-  if (BASE_URL !== '/' && path.startsWith(BASE_URL)) {
-    path = path.slice(BASE_URL.length)
-  }
-  return `/${path.replace(/^\/+/, '')}`
-}
-
-async function handleAuthCallback() {
-  if (!supabaseEnabled || !supabase) return false
-
-  const path = normalizePath(window.location.pathname)
-  if (!path.match(/^\/auth\/callback(\.html)?$/)) return false
-
-  const params = new URLSearchParams(window.location.search)
-  const hashParams = new URLSearchParams(window.location.hash.slice(1))
-  const code = params.get('code') || hashParams.get('code')
-  const tokenHash = params.get('token_hash') || hashParams.get('token_hash')
-  const accessToken = params.get('access_token') || hashParams.get('access_token')
-  const type = params.get('type') || hashParams.get('type') || 'email'
-
-  const statusEl = document.getElementById('cloudStatus')
-  const statusTextEl = document.getElementById('cloudStatusText')
-  const showStatus = (text) => {
-    if (statusEl) statusEl.textContent = text
-    if (statusTextEl) statusTextEl.textContent = text
-  }
-
-  try {
-    if (code) {
-      const { error } = await supabase.auth.exchangeCodeForSession(code)
-      if (error) throw error
-    } else if (tokenHash) {
-      const email = params.get('email') || hashParams.get('email')
-      const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type, email })
-      if (error) throw error
-    } else if (accessToken) {
-      const refreshToken = params.get('refresh_token') || hashParams.get('refresh_token')
-      const expiresIn = Number(params.get('expires_in') || hashParams.get('expires_in') || 3600)
-      const tokenType = params.get('token_type') || hashParams.get('token_type') || 'bearer'
-      await supabase.auth.setSession({
-        access_token: accessToken,
-        refresh_token: refreshToken || '',
-        expires_in: expiresIn,
-        token_type: tokenType
-      })
-    } else {
-      showStatus('登录回调缺少 code、token_hash 或 access_token，请重新发送登录邮件。')
-      return true
-    }
-
-    const { data } = await supabase.auth.getSession()
-    currentUser = data.session?.user || null
-    const home = `${BASE_URL.replace(/\/$/, '')}/`
-    window.history.replaceState({}, '', home)
-    showStatus(currentUser ? `云端已连接：当前账号 ${currentUser.email || currentUser.id}` : '登录完成。')
-    render()
-    return true
-  } catch (error) {
-    showStatus(`登录回调失败：${error.message}`)
-    console.warn('Supabase 登录回调失败', error.message)
-    return true
-  }
-}
+let allowRegistration = true
 
 function loadLocalTasks() {
   try {
@@ -111,56 +46,59 @@ function normalizeTask(row) {
 }
 
 async function syncTasks() {
-  if (!supabaseEnabled || !supabase || !currentUser) {
-    render()
-    return
-  }
-  const { data, error } = await supabase
-    .from('kanban_tasks')
-    .select('*')
-    .order('sort_order', { ascending: true })
-
-  if (error) {
-    console.warn('Supabase 读取失败，继续使用本地数据', error.message)
-    setCloudStatus('云端读取失败', '当前使用本地缓存。', 'local')
+  if (!currentUser) {
     render()
     return
   }
 
-  tasks = data && data.length ? data.map(normalizeTask) : structuredClone(defaultTasks)
-  persistLocal()
+  try {
+    const remoteTasks = await api.listTasks()
+    tasks = remoteTasks.length ? remoteTasks.map(normalizeTask) : structuredClone(defaultTasks)
+    persistLocal()
+    setCloudStatus('服务器已连接', `当前账号 ${currentUser.email || currentUser.id}`, 'online')
+  } catch (error) {
+    console.warn('服务器读取失败，继续使用本地数据', error.message)
+    setCloudStatus('服务器读取失败', '当前使用本地缓存。', 'local')
+  }
   render()
 }
 
-async function saveTaskToCloud(task) {
-  if (!supabaseEnabled || !supabase || !currentUser) return
+async function saveTaskToServer(task) {
+  if (!currentUser) return
+
   const payload = {
     title: task.title,
     description: task.description,
     status: task.status,
     priority: task.priority,
     category: task.category,
-    due_date: task.due_date || null,
-    due_time: task.due_time || null,
+    due_date: task.due_date || '',
+    due_time: task.due_time || '',
     tags: task.tags,
-    sort_order: task.sort_order || 0,
-    completed_at: task.status === 'done' ? new Date().toISOString() : null
+    sort_order: task.sort_order || 0
   }
 
-  if (task.id && !task.id.startsWith('local-')) {
-    const { error } = await supabase.from('kanban_tasks').update(payload).eq('id', task.id)
-    if (error) console.warn('更新云端任务失败', error.message)
-  } else {
-    const { data, error } = await supabase.from('kanban_tasks').insert(payload).select('id').single()
-    if (!error && data) task.id = data.id
+  try {
+    if (task.id && !task.id.startsWith('local-')) {
+      const updated = await api.updateTask(task.id, payload)
+      Object.assign(task, normalizeTask(updated))
+    } else {
+      const created = await api.createTask(payload)
+      Object.assign(task, normalizeTask(created))
+    }
+    persistLocal()
+  } catch (error) {
+    console.warn('保存任务到服务器失败', error.message)
+    setCloudStatus('保存失败', '改动已保留在本地，稍后可重试。', 'local')
   }
 }
 
-async function deleteTaskFromCloud(task) {
-  if (!supabaseEnabled || !supabase || !currentUser) return
-  if (task.id && !task.id.startsWith('local-')) {
-    const { error } = await supabase.from('kanban_tasks').delete().eq('id', task.id)
-    if (error) console.warn('删除云端任务失败', error.message)
+async function deleteTaskFromServer(task) {
+  if (!currentUser || !task.id || task.id.startsWith('local-')) return
+  try {
+    await api.deleteTask(task.id)
+  } catch (error) {
+    console.warn('删除服务器任务失败', error.message)
   }
 }
 
@@ -172,6 +110,17 @@ function setCloudStatus(label, detail, tone = 'local') {
     status.className = `status-pill ${tone}`
   }
   if (statusText) statusText.textContent = detail
+}
+
+async function loadAuthConfig() {
+  try {
+    const config = await api.getAuthConfig()
+    allowRegistration = Boolean(config.allowRegistration)
+  } catch {
+    allowRegistration = true
+  }
+  const registerButton = document.getElementById('authRegister')
+  if (registerButton) registerButton.style.display = allowRegistration ? '' : 'none'
 }
 
 function renderStats() {
@@ -196,9 +145,8 @@ function renderStats() {
     .map(t => `<li>${t.due_time ? `<span class="time">${t.due_time}</span>` : ''} <span>${escapeHtml(t.title)}</span></li>`)
     .join('') || '<li>今天没有待处理事项</li>'
 
-  if (!supabaseEnabled) setCloudStatus('本地模式', '未配置 Supabase，记录保存在当前浏览器。', 'local')
-  else if (!currentUser) setCloudStatus('未登录', '当前使用本地缓存；登录后可云端同步。', 'local')
-  else setCloudStatus('云端已连接', `当前账号 ${currentUser.email || currentUser.id}`, 'online')
+  if (!currentUser) setCloudStatus('未登录', '当前使用本地缓存；登录后可同步到 SQLite 服务器。', 'local')
+  else setCloudStatus('服务器已连接', `当前账号 ${currentUser.email || currentUser.id}`, 'online')
 }
 
 function escapeHtml(text) {
@@ -278,7 +226,7 @@ function renderBoard() {
       const task = tasks.find(t => t.id === card.dataset.id)
       task.status = btn.dataset.status
       persistLocal()
-      saveTaskToCloud(task)
+      saveTaskToServer(task)
       render()
     })
   })
@@ -296,7 +244,7 @@ function renderBoard() {
       const card = btn.closest('.card')
       const task = tasks.find(t => t.id === card.dataset.id)
       if (!confirm(`确定删除“${task.title}”吗？`)) return
-      await deleteTaskFromCloud(task)
+      await deleteTaskFromServer(task)
       tasks = tasks.filter(t => t.id !== task.id)
       persistLocal()
       render()
@@ -329,7 +277,7 @@ function bindDragDrop() {
       if (!task) return
       task.status = status
       persistLocal()
-      saveTaskToCloud(task)
+      saveTaskToServer(task)
       render()
     })
   })
@@ -350,7 +298,7 @@ function openTaskDialog(task = null) {
   document.getElementById('taskDialog').showModal()
 }
 
-function handleFormSubmit(event) {
+async function handleFormSubmit(event) {
   event.preventDefault()
   const form = event.target
   const tags = form.tags.value.split(',').map(tag => tag.trim()).filter(Boolean)
@@ -375,7 +323,7 @@ function handleFormSubmit(event) {
   }
 
   persistLocal()
-  saveTaskToCloud(task)
+  await saveTaskToServer(task)
   document.getElementById('taskDialog').close()
   render()
 }
@@ -387,10 +335,14 @@ function setAuthMessage(text, isError = false) {
   el.classList.toggle('error', Boolean(isError))
 }
 
-function openAuthDialog() {
+function openAuthDialog(mode = 'login') {
   const form = document.getElementById('authForm')
   form.email.value = pendingEmail || ''
-  setAuthMessage('输入邮箱后点击“发送登录链接”，再在同一浏览器里打开邮件并点击链接。')
+  form.password.value = ''
+  document.getElementById('authMode').textContent = mode === 'register' ? '注册账号' : '账号登录'
+  document.getElementById('authSubmit').textContent = mode === 'register' ? '注册并登录' : '登录'
+  setAuthMessage(mode === 'register' ? '首次使用请设置邮箱和至少 6 位密码。' : '输入账号密码登录，数据会同步到本地服务器。')
+  form.dataset.mode = mode
   document.getElementById('authDialog').showModal()
 }
 
@@ -399,40 +351,40 @@ function closeAuthDialog() {
   setAuthMessage('')
 }
 
-async function sendOtp() {
+async function submitAuth(event) {
+  event.preventDefault()
   const form = document.getElementById('authForm')
   const email = form.email.value.trim().toLowerCase()
-  if (!email) {
-    setAuthMessage('请先输入登录邮箱。', true)
+  const password = form.password.value
+  const mode = form.dataset.mode || 'login'
+
+  if (!email || !password) {
+    setAuthMessage('请输入邮箱和密码。', true)
     return
   }
 
   pendingEmail = email
-  setAuthMessage('正在发送登录链接……')
-  const redirectTo = `${window.location.origin}${BASE_URL.replace(/\/$/, '')}/auth/callback.html`
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: {
-      shouldCreateUser: true,
-      emailRedirectTo: redirectTo
-    }
-  })
+  setAuthMessage(mode === 'register' ? '正在注册账号……' : '正在登录……')
 
-  if (error) {
-    setAuthMessage(`登录链接发送失败：${error.message}`, true)
-    return
+  try {
+    const session = mode === 'register' ? await api.register({ email, password }) : await api.login({ email, password })
+    saveSession(session)
+    currentUser = session.user
+    closeAuthDialog()
+    await syncTasks()
+  } catch (error) {
+    setAuthMessage(error.message || '登录失败', true)
   }
-
-  setAuthMessage(`登录链接已发送到 ${email}，请在同一浏览器的邮件里点击 Sign in 链接。`)
 }
 
 async function handleAuth() {
-  if (!supabaseEnabled || !supabase) {
-    alert('未配置 Supabase 环境变量，当前只能使用本地模式。')
-    return
-  }
   if (currentUser) {
-    await supabase.auth.signOut()
+    try {
+      await api.logout()
+    } catch {
+      // 即使退出请求失败，也清理浏览器本地会话
+    }
+    clearSession()
     currentUser = null
     pendingEmail = ''
     tasks = structuredClone(defaultTasks)
@@ -440,7 +392,7 @@ async function handleAuth() {
     render()
     return
   }
-  openAuthDialog()
+  openAuthDialog('login')
 }
 
 function render() {
@@ -453,26 +405,17 @@ document.getElementById('cancelDialog').addEventListener('click', () => document
 document.getElementById('taskForm').addEventListener('submit', handleFormSubmit)
 document.getElementById('authButton').addEventListener('click', handleAuth)
 document.getElementById('cancelAuth').addEventListener('click', closeAuthDialog)
-document.getElementById('sendOtp').addEventListener('click', sendOtp)
-document.getElementById('authForm').addEventListener('submit', event => event.preventDefault())
+document.getElementById('authForm').addEventListener('submit', submitAuth)
+document.getElementById('authRegister').addEventListener('click', () => openAuthDialog('register'))
 
-async function initAuth() {
-  if (await handleAuthCallback()) return
-
-  if (!supabaseEnabled || !supabase) {
-    render()
-    return
-  }
-  const { data } = await supabase.auth.getSession()
-  currentUser = data.session?.user || null
+function updateAuthButton() {
   document.getElementById('authButton').textContent = currentUser ? '退出登录' : '登录'
-  await syncTasks()
-
-  supabase.auth.onAuthStateChange((_event, session) => {
-    currentUser = session?.user || null
-    document.getElementById('authButton').textContent = currentUser ? '退出登录' : '登录'
-    syncTasks()
-  })
 }
 
-initAuth()
+async function initApp() {
+  updateAuthButton()
+  await loadAuthConfig()
+  await syncTasks()
+}
+
+initApp()

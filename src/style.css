@@ -383,7 +383,6 @@ button.secondary:hover { background: var(--surface-hover); }
 .card:hover {
   border-color: var(--line-strong);
   box-shadow: 0 2px 4px rgba(15, 23, 42, 0.07), 0 14px 30px rgba(15, 23, 42, 0.08);
-  transform: translateY(-1px);
 }
 
 .card.dragging {
@@ -521,12 +520,13 @@ button.secondary:hover { background: var(--surface-hover); }
   overflow: hidden;
   border-radius: var(--radius);
   isolation: isolate;
+  touch-action: pan-y;
 }
 
 .swipe-delete {
   position: absolute;
   inset: 0 0 0 auto;
-  width: 86px;
+  width: 92px;
   border: 0;
   border-radius: var(--radius);
   background: linear-gradient(135deg, var(--danger), #b91c1c);
@@ -537,13 +537,17 @@ button.secondary:hover { background: var(--surface-hover); }
   z-index: 0;
 }
 
+.swipe-delete:active { filter: brightness(0.92); }
+
 .card-swipe .card {
   position: relative;
   z-index: 1;
   transition: transform 0.22s ease, border-color 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease, background 0.16s ease;
 }
 
-.card-swipe.swiped .card { transform: translateX(-86px); }
+.card-swipe.swiping .card { transition: none; }
+.card-swipe.swiped .card,
+.card-swipe.swiped:hover .card { transform: translateX(-92px); }
 
 .card-check {
   position: absolute;

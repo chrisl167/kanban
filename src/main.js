@@ -258,12 +258,12 @@ function taskCard(task) {
   return `
     <div class="card-swipe ${isSelected ? 'selected' : ''}" data-id="${task.id}">
       <button type="button" class="swipe-delete" data-action="delete" aria-label="删除事项">删除</button>
-      <article class="${cardClass}" draggable="true" data-id="${task.id}">
+      <article class="${cardClass}" draggable="false" data-id="${task.id}">
         <label class="card-check ${isSelected ? 'checked' : ''}" title="选择事项">
           <input type="checkbox" ${isSelected ? 'checked' : ''} data-action="check" aria-label="选择事项" />
           <span></span>
         </label>
-        <span class="drag-handle" title="拖拽卡片">⋮⋮</span>
+        <span class="drag-handle" draggable="true" title="拖拽卡片">⋮⋮</span>
         <div class="card-top">
           <div class="badges">
             <span class="badge ${task.category}">${categoryMap[task.category]}</span>
@@ -424,11 +424,15 @@ function renderBoard() {
 }
 
 function bindCardGestures() {
+  const OPEN_WIDTH = 92
+  const OPEN_THRESHOLD = 42
+
   document.querySelectorAll('.card-swipe').forEach(wrap => {
     let startX = 0
     let startY = 0
     let currentX = 0
-    let dragging = false
+    let pointerActive = false
+    let swiping = false
     let longPressTimer = null
     let longPressed = false
 
@@ -440,8 +444,13 @@ function bindCardGestures() {
       startX = event.clientX
       startY = event.clientY
       currentX = 0
-      dragging = false
+      pointerActive = true
+      swiping = false
       longPressed = false
+      card.classList.add('swiping')
+      document.querySelectorAll('.card-swipe.swiped').forEach(other => {
+        if (other !== wrap) other.classList.remove('swiped')
+      })
       wrap.setPointerCapture?.(event.pointerId)
 
       if (selectionMode) return
@@ -455,32 +464,44 @@ function bindCardGestures() {
     })
 
     wrap.addEventListener('pointermove', event => {
+      if (!pointerActive) return
       const dx = event.clientX - startX
       const dy = event.clientY - startY
-      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return
 
-      dragging = true
-      clearTimeout(longPressTimer)
-      if (Math.abs(dx) > Math.abs(dy)) {
-        currentX = Math.min(0, dx)
-        card.style.transform = `translateX(${currentX}px)`
+      if (!swiping && Math.abs(dx) < 8 && Math.abs(dy) < 8) return
+      if (Math.abs(dy) > Math.abs(dx)) {
+        card.style.transform = ''
+        return
       }
+
+      swiping = true
+      clearTimeout(longPressTimer)
+
+      let x = wrap.classList.contains('swiped') ? -OPEN_WIDTH + dx : dx
+      if (x < -OPEN_WIDTH) x = -OPEN_WIDTH + (x + OPEN_WIDTH) * 0.18
+      if (x > 0) x = 0
+      currentX = x
+      card.style.transform = `translateX(${x}px)`
     })
 
     const finishPointer = () => {
       clearTimeout(longPressTimer)
-      card.style.transform = ''
-      if (dragging) {
-        if (currentX < -60) wrap.classList.add('swiped')
-        else if (currentX > 40 || !wrap.classList.contains('swiped')) closeSwipe()
+      pointerActive = false
+      card.classList.remove('swiping')
+
+      if (swiping) {
+        if (currentX < -OPEN_THRESHOLD) wrap.classList.add('swiped')
+        else closeSwipe()
+        card.style.transform = ''
       }
-      setTimeout(() => { dragging = false; longPressed = false }, 0)
+
+      setTimeout(() => { swiping = false; longPressed = false }, 0)
     }
 
     wrap.addEventListener('pointerup', finishPointer)
     wrap.addEventListener('pointercancel', finishPointer)
     wrap.addEventListener('click', event => {
-      if (dragging || longPressed) {
+      if (swiping || longPressed) {
         event.stopPropagation()
         event.preventDefault()
         return
@@ -495,6 +516,10 @@ function bindCardGestures() {
 function bindDragDrop() {
   document.querySelectorAll('.card').forEach(card => {
     card.addEventListener('dragstart', e => {
+      if (!e.target.closest('.drag-handle')) {
+        e.preventDefault()
+        return
+      }
       const ids = selectionMode && selectedIds.has(card.dataset.id) ? [...selectedIds] : [card.dataset.id]
       card.classList.add('dragging')
       e.dataTransfer.effectAllowed = 'move'
@@ -772,6 +797,12 @@ document.getElementById('exitBatchButton').addEventListener('click', () => setSe
 document.getElementById('batchDeleteButton').addEventListener('click', () => deleteTasks([...selectedIds]))
 document.querySelectorAll('[data-batch-move]').forEach(btn => {
   btn.addEventListener('click', () => moveTasksTo(btn.dataset.batchMove))
+})
+
+document.addEventListener('click', event => {
+  if (!event.target.closest('.card-swipe')) {
+    document.querySelectorAll('.card-swipe.swiped').forEach(wrap => wrap.classList.remove('swiped'))
+  }
 })
 
 async function initApp() {

@@ -1,5 +1,6 @@
 #!/bin/sh
-# 生成长期部署压缩包：包含前端构建产物、后端源码和部署配置，不含 node_modules 与本地数据库。
+# 生成长期部署压缩包：前端构建产物、Python FastAPI 后端源码和部署配置。
+# 不含 node_modules、本地数据库、.git 与压缩包自身。
 
 set -eu
 
@@ -17,6 +18,8 @@ tar -czf "$TMP_OUT" \
   --exclude='node_modules' \
   --exclude='server/node_modules' \
   --exclude='server/data' \
+  --exclude='server-py/data' \
+  --exclude='server-py/__pycache__' \
   --exclude='.git' \
   --exclude='deploy/kanban-deploy.tar.gz' \
   index.html \
@@ -24,7 +27,7 @@ tar -czf "$TMP_OUT" \
   package-lock.json \
   vite.config.js \
   dist \
-  server \
+  server-py \
   src \
   deploy
 

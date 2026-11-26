@@ -9,3 +9,8 @@ server/data/*.db
 server/data/*.db-wal
 server/data/*.db-shm
 deploy/*.tar.gz
+__pycache__/
+*.pyc
+server-py/data/*.db
+server-py/data/*.db-wal
+server-py/data/*.db-shm

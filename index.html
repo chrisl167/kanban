@@ -18,6 +18,7 @@
         </div>
         <div class="header-actions">
           <button class="secondary" id="profileButton" hidden>个人中心</button>
+          <button class="secondary" id="multiSelectButton">多选</button>
           <button class="secondary" id="authButton">登录</button>
           <button class="primary" id="addTask">新增事项</button>
         </div>
@@ -42,6 +43,24 @@
               <div class="progress-bar" id="progressBar"></div>
             </div>
             <p class="cloud-status" id="cloudStatusText">记录保存在当前浏览器。</p>
+          </div>
+        </section>
+
+        <section class="batch-bar" id="batchBar" hidden>
+          <div class="batch-info">
+            <span id="batchCount">已选 0 项</span>
+            <button type="button" class="secondary" id="selectAllButton">全选</button>
+          </div>
+          <div class="batch-actions">
+            <button type="button" data-batch-move="todo">移到待办</button>
+            <button type="button" data-batch-move="doing">移到进行中</button>
+            <button type="button" data-batch-move="done">标记完成</button>
+            <button type="button" class="danger" id="batchDeleteButton">批量删除</button>
+            <button type="button" class="secondary" id="exitBatchButton">退出多选</button>
+          </div>
+          <div class="batch-trash" id="batchTrash" aria-label="拖到此处删除所选事项">
+            <span class="trash-icon">🗑</span>
+            <span>拖到此处删除</span>
           </div>
         </section>
 

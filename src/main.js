@@ -16,6 +16,8 @@ let editingId = null
 let pendingEmail = ''
 let allowRegistration = true
 let forcedPasswordChange = false
+let selectionMode = false
+let selectedIds = new Set()
 let systemThemeMedia = null
 let systemThemeWatcher = null
 
@@ -247,39 +249,125 @@ function taskCard(task) {
   const priorityMap = { low: '低', normal: '普通', high: '高', urgent: '紧急' }
   const categoryMap = { medication: '服药', work: '工作', personal: '个人', other: '其他' }
   const state = dueState(task)
-  const cardClass = ['card', state, task.status === 'done' ? 'done' : ''].filter(Boolean).join(' ')
+  const isSelected = selectedIds.has(task.id)
+  const cardClass = ['card', state, task.status === 'done' ? 'done' : '', isSelected ? 'selected' : ''].filter(Boolean).join(' ')
   const dueText = formatDue(task)
   const tagsHtml = task.tags?.length
     ? `<div class="tags">${task.tags.map(tag => `<span>#${escapeHtml(tag)}</span>`).join('')}</div>`
     : ''
   return `
-    <article class="${cardClass}" draggable="true" data-id="${task.id}">
-      <span class="drag-handle" title="拖拽卡片">⋮⋮</span>
-      <div class="card-top">
-        <div class="badges">
-          <span class="badge ${task.category}">${categoryMap[task.category]}</span>
-          <span class="priority ${task.priority}">${priorityMap[task.priority]}</span>
+    <div class="card-swipe ${isSelected ? 'selected' : ''}" data-id="${task.id}">
+      <button type="button" class="swipe-delete" data-action="delete" aria-label="删除事项">删除</button>
+      <article class="${cardClass}" draggable="true" data-id="${task.id}">
+        <label class="card-check ${isSelected ? 'checked' : ''}" title="选择事项">
+          <input type="checkbox" ${isSelected ? 'checked' : ''} data-action="check" aria-label="选择事项" />
+          <span></span>
+        </label>
+        <span class="drag-handle" title="拖拽卡片">⋮⋮</span>
+        <div class="card-top">
+          <div class="badges">
+            <span class="badge ${task.category}">${categoryMap[task.category]}</span>
+            <span class="priority ${task.priority}">${priorityMap[task.priority]}</span>
+          </div>
         </div>
-      </div>
-      <h4>${escapeHtml(task.title)}</h4>
-      <p>${escapeHtml(task.description)}</p>
-      ${tagsHtml}
-      <div class="card-meta">
-        ${dueText ? `<span class="due-meta ${state}">${escapeHtml(dueText)}</span>` : '<span class="due-meta muted">未设置截止时间</span>'}
-      </div>
-      <div class="card-actions">
-        <button type="button" data-action="edit" title="编辑事项">编辑</button>
-        <button type="button" data-action="move" data-status="todo" title="移到待办">待办</button>
-        <button type="button" data-action="move" data-status="doing" title="移到进行中">进行中</button>
-        <button type="button" data-action="move" data-status="done" title="标记完成">完成</button>
-        <button type="button" data-action="delete" class="danger" title="删除事项">删除</button>
-      </div>
-    </article>
+        <h4>${escapeHtml(task.title)}</h4>
+        <p>${escapeHtml(task.description)}</p>
+        ${tagsHtml}
+        <div class="card-meta">
+          ${dueText ? `<span class="due-meta ${state}">${escapeHtml(dueText)}</span>` : '<span class="due-meta muted">未设置截止时间</span>'}
+        </div>
+        <div class="card-actions">
+          <button type="button" data-action="edit" title="编辑事项">编辑</button>
+          <button type="button" data-action="move" data-status="todo" title="移到待办">待办</button>
+          <button type="button" data-action="move" data-status="doing" title="移到进行中">进行中</button>
+          <button type="button" data-action="move" data-status="done" title="标记完成">完成</button>
+        </div>
+      </article>
+    </div>
   `
+}
+
+function updateBatchBar() {
+  const bar = document.getElementById('batchBar')
+  const count = document.getElementById('batchCount')
+  const selectAll = document.getElementById('selectAllButton')
+  const multi = document.getElementById('multiSelectButton')
+  if (!bar) return
+  bar.hidden = !selectionMode
+  if (count) count.textContent = `已选 ${selectedIds.size} 项`
+  if (selectAll) selectAll.textContent = selectedIds.size === tasks.length && tasks.length ? '取消全选' : '全选'
+  if (multi) {
+    multi.textContent = selectionMode ? '退出多选' : '多选'
+    multi.classList.toggle('active', selectionMode)
+  }
+}
+
+function setSelectionMode(on) {
+  selectionMode = on
+  if (!on) selectedIds.clear()
+  updateBatchBar()
+  render()
+}
+
+function toggleSelect(id) {
+  if (selectedIds.has(id)) selectedIds.delete(id)
+  else selectedIds.add(id)
+  updateBatchBar()
+  render()
+}
+
+function toggleSelectAll() {
+  if (selectedIds.size === tasks.length) selectedIds.clear()
+  else selectedIds = new Set(tasks.map(task => task.id))
+  updateBatchBar()
+  render()
+}
+
+async function moveTasksTo(status, ids = [...selectedIds]) {
+  const picked = tasks.filter(task => ids.includes(task.id))
+  if (!picked.length) return
+  picked.forEach(task => { task.status = status })
+  persistLocal()
+  await Promise.all(picked.map(saveTaskToServer))
+  render()
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function deleteTasks(ids) {
+  const picked = tasks.filter(task => ids.includes(task.id))
+  if (!picked.length) return
+
+  ids.forEach(id => {
+    const el = document.querySelector(`.card-swipe[data-id="${CSS.escape(id)}"]`)
+    el?.classList.add('removing')
+  })
+
+  await sleep(220)
+  await Promise.all(picked.map(deleteTaskFromServer))
+  tasks = tasks.filter(task => !ids.includes(task.id))
+  ids.forEach(id => selectedIds.delete(id))
+  persistLocal()
+  updateBatchBar()
+  render()
+}
+
+function getDraggedIds(e) {
+  const raw = e.dataTransfer.getData('application/x-kanban-ids') || e.dataTransfer.getData('text/plain')
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : [parsed]
+  } catch {
+    return [raw]
+  }
 }
 
 function renderBoard() {
   const board = document.getElementById('board')
+  board.classList.toggle('selection-mode', selectionMode)
   board.innerHTML = columns.map(col => {
     const list = tasks.filter(t => t.status === col.key)
     const empty = list.length ? '' : emptyIllustration(col.key === 'done' ? '已完成的事项会显示在这里' : '暂无事项，拖拽卡片到这里或新增事项')
@@ -298,6 +386,7 @@ function renderBoard() {
     btn.addEventListener('click', () => {
       const card = btn.closest('.card')
       const task = tasks.find(t => t.id === card.dataset.id)
+      if (!task) return
       task.status = btn.dataset.status
       persistLocal()
       saveTaskToServer(task)
@@ -309,31 +398,108 @@ function renderBoard() {
     btn.addEventListener('click', () => {
       const card = btn.closest('.card')
       const task = tasks.find(t => t.id === card.dataset.id)
-      openTaskDialog(task)
+      if (task) openTaskDialog(task)
+    })
+  })
+
+  board.querySelectorAll('[data-action="check"]').forEach(input => {
+    input.addEventListener('click', event => event.stopPropagation())
+    input.addEventListener('change', () => {
+      const card = input.closest('.card')
+      if (card) toggleSelect(card.dataset.id)
     })
   })
 
   board.querySelectorAll('[data-action="delete"]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const card = btn.closest('.card')
-      const task = tasks.find(t => t.id === card.dataset.id)
-      if (!confirm(`确定删除“${task.title}”吗？`)) return
-      await deleteTaskFromServer(task)
-      tasks = tasks.filter(t => t.id !== task.id)
-      persistLocal()
-      render()
+      const wrap = btn.closest('.card-swipe')
+      const task = tasks.find(t => t.id === wrap.dataset.id)
+      if (task) await deleteTasks([task.id])
     })
   })
 
+  bindCardGestures()
   bindDragDrop()
+  updateBatchBar()
+}
+
+function bindCardGestures() {
+  document.querySelectorAll('.card-swipe').forEach(wrap => {
+    let startX = 0
+    let startY = 0
+    let currentX = 0
+    let dragging = false
+    let longPressTimer = null
+    let longPressed = false
+
+    const card = wrap.querySelector('.card')
+
+    const closeSwipe = () => wrap.classList.remove('swiped')
+
+    wrap.addEventListener('pointerdown', event => {
+      startX = event.clientX
+      startY = event.clientY
+      currentX = 0
+      dragging = false
+      longPressed = false
+      wrap.setPointerCapture?.(event.pointerId)
+
+      if (selectionMode) return
+      longPressTimer = setTimeout(() => {
+        longPressed = true
+        selectionMode = true
+        selectedIds.add(wrap.dataset.id)
+        updateBatchBar()
+        render()
+      }, 450)
+    })
+
+    wrap.addEventListener('pointermove', event => {
+      const dx = event.clientX - startX
+      const dy = event.clientY - startY
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return
+
+      dragging = true
+      clearTimeout(longPressTimer)
+      if (Math.abs(dx) > Math.abs(dy)) {
+        currentX = Math.min(0, dx)
+        card.style.transform = `translateX(${currentX}px)`
+      }
+    })
+
+    const finishPointer = () => {
+      clearTimeout(longPressTimer)
+      card.style.transform = ''
+      if (dragging) {
+        if (currentX < -60) wrap.classList.add('swiped')
+        else if (currentX > 40 || !wrap.classList.contains('swiped')) closeSwipe()
+      }
+      setTimeout(() => { dragging = false; longPressed = false }, 0)
+    }
+
+    wrap.addEventListener('pointerup', finishPointer)
+    wrap.addEventListener('pointercancel', finishPointer)
+    wrap.addEventListener('click', event => {
+      if (dragging || longPressed) {
+        event.stopPropagation()
+        event.preventDefault()
+        return
+      }
+      if (selectionMode && event.target.closest('.card') && !event.target.closest('button, label')) {
+        toggleSelect(wrap.dataset.id)
+      }
+    })
+  })
 }
 
 function bindDragDrop() {
   document.querySelectorAll('.card').forEach(card => {
     card.addEventListener('dragstart', e => {
+      const ids = selectionMode && selectedIds.has(card.dataset.id) ? [...selectedIds] : [card.dataset.id]
       card.classList.add('dragging')
       e.dataTransfer.effectAllowed = 'move'
-      e.dataTransfer.setData('text/plain', card.dataset.id)
+      e.dataTransfer.setData('application/x-kanban-ids', JSON.stringify(ids))
+      e.dataTransfer.setData('text/plain', JSON.stringify(ids))
     })
     card.addEventListener('dragend', () => card.classList.remove('dragging'))
   })
@@ -348,29 +514,27 @@ function bindDragDrop() {
     zone.addEventListener('drop', e => {
       zone.classList.remove('dragover')
       e.preventDefault()
-      const id = e.dataTransfer.getData('text/plain')
+      const ids = getDraggedIds(e)
       const status = zone.closest('.column').dataset.status
-      const task = tasks.find(t => t.id === id)
-      if (!task) return
-
-      const cards = [...zone.querySelectorAll('.card:not(.dragging)')]
-      const afterCard = cards.find(card => e.clientY < card.getBoundingClientRect().top + card.offsetHeight / 2)
-      tasks = tasks.filter(t => t.id !== task.id)
-      task.status = status
-
-      if (afterCard) {
-        const afterTask = tasks.find(t => t.id === afterCard.dataset.id)
-        const index = afterTask ? tasks.indexOf(afterTask) + 1 : tasks.length
-        tasks.splice(index, 0, task)
-      } else {
-        tasks.unshift(task)
-      }
-
-      persistLocal()
-      saveTaskToServer(task)
-      render()
+      if (ids.length) moveTasksTo(status, ids)
     })
   })
+
+  const trash = document.getElementById('batchTrash')
+  if (trash) {
+    trash.addEventListener('dragover', e => {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+      trash.classList.add('dragover')
+    })
+    trash.addEventListener('dragleave', () => trash.classList.remove('dragover'))
+    trash.addEventListener('drop', e => {
+      trash.classList.remove('dragover')
+      e.preventDefault()
+      const ids = getDraggedIds(e)
+      if (ids.length) deleteTasks(ids)
+    })
+  }
 }
 
 function openTaskDialog(task = null) {
@@ -491,6 +655,8 @@ async function handleAuth() {
     currentUser = null
     pendingEmail = ''
     forcedPasswordChange = false
+    selectionMode = false
+    selectedIds.clear()
     tasks = structuredClone(defaultTasks)
     persistLocal()
     applyProfile()
@@ -598,6 +764,14 @@ document.getElementById('cancelPassword').addEventListener('click', () => {
 })
 document.getElementById('passwordDialog').addEventListener('cancel', event => {
   if (forcedPasswordChange) event.preventDefault()
+})
+
+document.getElementById('multiSelectButton').addEventListener('click', () => setSelectionMode(!selectionMode))
+document.getElementById('selectAllButton').addEventListener('click', toggleSelectAll)
+document.getElementById('exitBatchButton').addEventListener('click', () => setSelectionMode(false))
+document.getElementById('batchDeleteButton').addEventListener('click', () => deleteTasks([...selectedIds]))
+document.querySelectorAll('[data-batch-move]').forEach(btn => {
+  btn.addEventListener('click', () => moveTasksTo(btn.dataset.batchMove))
 })
 
 async function initApp() {

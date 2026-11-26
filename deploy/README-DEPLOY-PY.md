@@ -53,25 +53,28 @@ curl --noproxy '*' http://127.0.0.1:8766/api/auth/config
 
 预期：健康检查返回 `{"ok":true,...}`；配置返回 `{"allowRegistration":false}`。局域网 Windows 访问 `http://192.168.31.242:8766/`。
 
-## 5. 开机自启
+## 5. 开机自启与 Tunnel 通知
 
-参考现有 `/root/health-app/autostart.sh` 的方式，在 `/etc/rc.local` 的 `exit 0` 前加入：
+`/opt/kanban/kanban-autostart.sh` 会在开机后等待网络，依次拉起看板服务、独立随机 Tunnel，并调用通知脚本。在 `/etc/rc.local` 的 `exit 0` 前加入：
 
 ```sh
-/opt/kanban/start-kanban.sh &
+/opt/kanban/kanban-autostart.sh &
 ```
 
-保存后重启路由器验证进程是否自动拉起。
+通知脚本：
+
+- Tunnel 日志：`/mnt/sata2-4/kanban/tunnel.log`
+- 上次地址：`/mnt/sata2-4/kanban/.last_tunnel_url`
+- 通知日志：`/mnt/sata2-4/kanban/notify.log`
+- 手动重发：`/opt/kanban/tunnel-notify.sh --force`
+
+通知收件人复用现有 `/root/health-app/config.json` 中的 `owner_open_id`，不在看板目录重复保存联系人或密钥。
 
 ## 6. Cloudflare Tunnel 入口
 
-看板后端同时监听局域网 `0.0.0.0:8766`；对外访问建议仍通过独立 tunnel 回连本机。临时验证可用 ephemeral tunnel：
+当前使用独立 ephemeral/random tunnel，回连 `http://127.0.0.1:8766`；随机域名重启或断线后可能变化，新地址会通过飞书通知。现有 `8765` tunnel 只服务旧 health-app，不要混用。
 
-```sh
-/root/cloudflared/cloudflared tunnel --url http://127.0.0.1:8766 --protocol http2 --no-autoupdate
-```
-
-长期方案建议在 Cloudflare 后台配置命名 Tunnel，把固定 hostname 指向 `http://127.0.0.1:8766`。现有 `8765` tunnel 只服务旧 health-app，不要混用。
+长期方案建议在 Cloudflare 后台配置命名 Tunnel，把固定 hostname 指向 `http://127.0.0.1:8766`。
 
 ## 7. 备份
 
